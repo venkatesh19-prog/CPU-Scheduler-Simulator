@@ -1,0 +1,29 @@
+﻿# CPU Scheduler Simulator
+
+Educational app to simulate CPU scheduling algorithms (FCFS, SRTF, RR, Adaptive).
+Run locally:
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+
+---
+
+## Step 3 — Commit 3: fill .gitignore and push
+```powershell
+@'
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+instance/
