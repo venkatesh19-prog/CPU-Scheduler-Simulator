@@ -105,3 +105,7 @@ select, input[type="number"] { width:100%; padding:8px 10px; border-radius:8px; 
 /* small helpers */
 .center { text-align:center; }
 .mt-12 { margin-top: 12px; }
+
+/* visual polish: subtle Gantt border */
+.gantt-svg{border-radius:6px;border:1px solid rgba(0,0,0,0.03);}
+
