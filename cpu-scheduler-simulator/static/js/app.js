@@ -369,6 +369,4 @@
 
 })();
 
-// UX: minor debug marker
-console.log('UI: simulator loaded');
 
