@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Intelligent CPU Scheduler — Clean UI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <h2>Intelligent CPU Scheduler — Responsive</h2>
+      <div class="sub">Interactive Gantt chart & smart recommendations</div>
+    </header>
+
+    <main class="main">
+      <aside class="sidebar">
+        <div class="panel">
+
+          <label class="label" for="mode">Mode</label>
+          <select id="mode">
+            <option value="ADAPTIVE">ADAPTIVE</option>
+            <option value="FCFS">FCFS</option>
+            <option value="SRTF">SRTF</option>
+            <option value="RR">RR</option>
+          </select>
+
+          <label class="label" for="goal">Goal</label>
+          <select id="goal">
+            <option value="">(none)</option>
+            <option value="minWaiting">Minimize waiting</option>
+            <option value="fairness">Fairness</option>
+            <option value="lowContext">Reduce context switches</option>
+          </select>
+
+          <label class="checkbox">
+            <input id="predict" type="checkbox" checked />
+            Enable prediction
+          </label>
+
+          <div class="recommend" id="recommendBox">
+            <div><strong>Recommendation:</strong> <span id="recAlgo">—</span></div>
+            <div class="muted" id="recReason">—</div>
+            <div class="small" style="margin-top:8px">Suggested RR quantum: <b id="recQuantum">-</b></div>
+          </div>
+
+          <div class="controls-row">
+            <button id="playBtn" class="btn primary">Play</button>
+            <button id="stepBack" class="btn">Step -</button>
+            <button id="stepForward" class="btn">Step +</button>
+            <button id="resetBtn" class="btn">Reset</button>
+          </div>
+
+          <div class="panel mt-12">
+            <button id="loadSimple" class="btn block">Load Sample</button>
+
+            <!-- Process table (always shown) -->
+            <div class="json-table-wrap" style="margin-top:10px">
+              <table class="json-table">
+                <thead>
+                  <tr>
+                    <th>PID</th>
+                    <th>Arrival</th>
+                    <th>Burst</th>
+                  </tr>
+                </thead>
+                <tbody id="jsonTableBody">
+                  <tr><td colspan="3" class="muted center small">No data</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="card">
+          <div class="card-header">
+            <h4>Gantt & Timeline</h4>
+            <div class="muted" id="tickLabel">Tick: 0 / 0</div>
+          </div>
+
+          <div id="ganttWrap" class="gantt-wrap">
+            <div id="ganttSvgContainer"></div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card-section">
+              <h5>Summary</h5>
+              <div id="summaryBox">No data</div>
+            </div>
+
+            <div class="card-section">
+              <h5>Processes</h5>
+              <table class="proc-table">
+                <thead><tr><th>PID</th><th>Arr</th><th>Burst</th><th></th></tr></thead>
+                <tbody id="procTbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="add-form">
+              <label>Arrival
+                <input id="inArrival" type="number" min="0" value="0" />
+              </label>
+
+              <label>Burst
+                <input id="inBurst" type="number" min="1" value="1" />
+              </label>
+
+              <button id="addProc" class="btn primary">Add</button>
+              <button id="addSample" class="btn">Add Sample</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
