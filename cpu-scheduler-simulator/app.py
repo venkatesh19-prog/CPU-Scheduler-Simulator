@@ -133,3 +133,18 @@ def simulate():
 
 if __name__ == "__main__":
     app.run(debug=True)
+# Added inline documentation comments for clarity.
+# These comments explain routing and algorithm flow.
+
+# --- Routing Notes ---
+# The '/' route renders the main UI (templates/index.html).
+# The '/schedule' POST request receives process data, runs the selected algorithm,
+# computes metrics, and returns JSON back to the frontend.
+
+# --- Algorithm Notes ---
+# Supported algorithms:
+# - FCFS
+# - SJF / SRTF
+# - Round Robin
+# - Priority Scheduling (non-preemptive)
+# The compute_metrics() function calculates WT, TAT, CPU Utilization, etc.
