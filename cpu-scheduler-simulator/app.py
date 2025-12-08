@@ -148,3 +148,5 @@ if __name__ == "__main__":
 # - Round Robin
 # - Priority Scheduling (non-preemptive)
 # The compute_metrics() function calculates WT, TAT, CPU Utilization, etc.
+
+# Dev Note: Backend routing structured for easy extension
