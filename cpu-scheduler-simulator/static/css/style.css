@@ -109,3 +109,5 @@ select, input[type="number"] { width:100%; padding:8px 10px; border-radius:8px; 
 /* visual polish: subtle Gantt border */
 .gantt-svg{border-radius:6px;border:1px solid rgba(0,0,0,0.03);}
 
+
+/* Minor UI comment for developers */
