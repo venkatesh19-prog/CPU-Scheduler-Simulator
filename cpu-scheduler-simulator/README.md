@@ -10,3 +10,8 @@ Run locally:
 
 Open http://127.0.0.1:5000
 
+### Minor update: Improve documentation clarity and add version note.
+Version: 1.0.1
+### Update: Added clarity note
+ 
+### Minor formatting improvement for readability
