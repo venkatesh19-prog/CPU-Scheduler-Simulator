@@ -370,3 +370,9 @@
 })();
 
 
+/* 
+  Visualization Notes:
+  This block explains how the Gantt Chart SVG is rendered.
+  - Each event is converted into a block (start ? end)
+  - Active process highlighted using a tick marker
+*/
