@@ -1,5 +1,5 @@
 // static/js/app.js
-// Clean frontend scheduler: scheduling engines + SVG Gantt + animated canvas gantt with popup
+// Clean frontend scheduler: scheduling engines + SVG Gantt + animated canvas gantt with popup & lift & replay
 
 (function () {
   /* ---------- Helpers ---------- */
@@ -393,7 +393,7 @@
 
   init();
 
-  /* ---------- Animated Canvas Gantt with popup & synced controls ---------- */
+  /* ---------- Animated Canvas Gantt with popup, lift animation & replay support ---------- */
   (function(){
     const canvas = document.getElementById("gantt");
     const playBtn = document.getElementById("playBtn");
@@ -411,6 +411,8 @@
     const trackHeight = 22;
     const trackGap = 10;
     const barRadius = 6;
+    const LIFT_PX = 8; // how much the active bar lifts
+    const SHADOW_ALPHA = 0.14;
 
     let animState = {
       schedule: null,
@@ -478,22 +480,27 @@
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0,0,rect.width,rect.height);
 
+      // header
       ctx.fillStyle = "#0b1220";
       ctx.font = "600 14px Arial";
       ctx.fillText("Time →", 8, padding.top + 6);
 
+      // rows
       pidRows.forEach(rowInfo => {
         const y = padding.top + 28 + rowInfo.row * (trackHeight + trackGap);
+        // label
         ctx.fillStyle = "#0b1220";
         ctx.font = "600 12px Arial";
         ctx.fillText(rowInfo.pid, 8, y + trackHeight / 2 + 2);
 
+        // timeline track
         ctx.fillStyle = "#f8fafc";
         const x0 = padding.left;
         const w = rect.width - padding.left - padding.right;
         ctx.fillRect(x0, y, w, trackHeight);
       });
 
+      // draw all bars (full segments) — base bars
       schedule.forEach(seg => {
         const [s,e,pid] = seg;
         const rowInfo = pid === null ? null : pidRows.find(p => p.pid === pid);
@@ -519,6 +526,7 @@
         }
       });
 
+      // ticks
       ctx.fillStyle = "#374151";
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
@@ -533,11 +541,52 @@
     }
 
     function renderFrame(anim) {
+      // draw base
       renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.startTime, end: anim.endTime });
+
+      // highlight active segment by re-drawing it lifted with shadow
+      const activeSeg = anim.schedule.find(seg => (anim.currentTime >= seg[0] && anim.currentTime < seg[1]));
+      if (activeSeg) {
+        const [s,e,pid] = activeSeg;
+        const rowInfo = pid ? anim.pidRows.find(p => p.pid === pid) : null;
+        const yBase = pid ? padding.top + 28 + rowInfo.row * (trackHeight + trackGap) : padding.top + 28 + (anim.pidRows.length * (trackHeight + trackGap));
+        const x1 = timeToX(s, anim.startTime, anim.endTime, anim.canvasWidth);
+        const x2 = timeToX(e, anim.startTime, anim.endTime, anim.canvasWidth);
+        const w = Math.max(1, x2 - x1);
+        const liftedY = yBase - LIFT_PX;
+
+        // subtle shadow
+        ctx.save();
+        ctx.fillStyle = "rgba(2,6,23," + SHADOW_ALPHA + ")";
+        roundRect(ctx, x1 + 2, liftedY + trackHeight + 2, w - 4, 6, 4);
+        ctx.restore();
+
+        // drawn lifted bar
+        ctx.fillStyle = pid ? rowInfo.color : "#e5e7eb";
+        ctx.globalAlpha = pid ? 1 : 0.8;
+        roundRect(ctx, x1, liftedY+2, w, trackHeight-4, barRadius);
+
+        // label on lifted bar
+        ctx.fillStyle = pid ? "#fff" : "#0b1220";
+        ctx.font = "600 11px Arial";
+        ctx.textAlign = "center";
+        if (w > 40) ctx.fillText(pid ? `${pid} (${s}-${e})` : "idle", x1 + w/2, liftedY + trackHeight/2 + 2);
+        else ctx.fillText(pid || "idle", x2 + 6, liftedY + trackHeight/2 + 2);
+
+        // small glow around lifted bar
+        ctx.save();
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = pid ? rowInfo.color : "#000";
+        roundRect(ctx, x1 - 6, liftedY - 6, w + 12, trackHeight + 16, barRadius + 6);
+        ctx.restore();
+      }
+
+      // draw executed overlay (progress area)
       const executedX = timeToX(anim.currentTime, anim.startTime, anim.endTime, anim.canvasWidth);
       ctx.fillStyle = "rgba(2,6,23,0.04)";
       ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, anim.canvasHeight - padding.top - padding.bottom - 24);
 
+      // draw playhead line
       ctx.beginPath();
       ctx.strokeStyle = "#ff253f";
       ctx.lineWidth = 2;
@@ -545,6 +594,7 @@
       ctx.lineTo(executedX + 0.5, anim.canvasHeight - padding.bottom + 6);
       ctx.stroke();
 
+      // draw time label
       ctx.fillStyle = "#0b1220";
       ctx.font = "600 12px Arial";
       ctx.textAlign = "center";
@@ -560,7 +610,7 @@
       const x2 = timeToX(start + burst, animState.startTime, animState.endTime, canvasRect.width);
       const centerX = Math.round((x1 + x2) / 2);
       const y = padding.top + 28 + rowInfo.row * (trackHeight + trackGap);
-      const top = canvasRect.top + window.scrollY + Math.max(6, y - 36);
+      const top = canvasRect.top + window.scrollY + Math.max(6, y - 36 - LIFT_PX);
       const left = canvasRect.left + centerX - 60;
       popup.style.left = `${Math.max(8, left)}px`;
       popup.style.top = `${top}px`;
@@ -639,9 +689,13 @@
 
       if (sidebarPlay) sidebarPlay.innerText = "Play";
 
+      // Play button: always start (and restart if at end)
       playBtn.onclick = function() {
         if (!animState.schedule) return;
-        if (animState.currentTime >= animState.endTime) animState.currentTime = animState.startTime;
+        // if playback completed, allow replay by resetting to start
+        if (animState.currentTime >= animState.endTime) {
+          animState.currentTime = animState.startTime;
+        }
         animState.playing = true;
         animState.speed = parseFloat(speedSel.value) || 1;
         playBtn.disabled = true;
@@ -659,16 +713,21 @@
 
       speedSel.onchange = function() { animState.speed = parseFloat(speedSel.value) || 1; };
 
+      // sidebarPlay toggles the same animState and supports replay
       if (sidebarPlay) {
         sidebarPlay.onclick = function() {
           if (!animState.schedule) return;
           if (animState.playing) {
+            // pause both
             animState.playing = false;
             playBtn.disabled = false;
             pauseBtn.disabled = true;
             sidebarPlay.innerText = "Play";
           } else {
-            if (animState.currentTime >= animState.endTime) animState.currentTime = animState.startTime;
+            // replay if finished
+            if (animState.currentTime >= animState.endTime) {
+              animState.currentTime = animState.startTime;
+            }
             animState.playing = true;
             animState.speed = parseFloat(speedSel.value) || 1;
             playBtn.disabled = true;
