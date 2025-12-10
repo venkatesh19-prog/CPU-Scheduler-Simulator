@@ -1,17 +1,50 @@
-﻿CPU Scheduler Simulator
+# CPU Scheduler Simulator
 
-This project simulates FCFS, SRTF, Round Robin and an Adaptive scheduler.
+**Intelligent CPU Scheduler** — a small educational app that simulates CPU scheduling algorithms and visualizes them with a responsive SVG Gantt chart.
 
-Run locally:
-1) python -m venv venv
-2) .\venv\Scripts\Activate.ps1
-3) pip install -r requirements.txt
-4) python app.py
+**Features**
+- Simulates FCFS, SRTF (SJF preemptive), Round Robin (RR) and an Adaptive mode.
+- Local browser simulation (no server calls required).
+- Play / Pause / Step controls, process add/remove, preset loader.
+- Metrics: average waiting time, turnaround, CPU utilization, throughput, context switches.
+- Clean responsive UI (Flask serves static files and template).
 
-Open http://127.0.0.1:5000
+---
 
-### Minor update: Improve documentation clarity and add version note.
-Version: 1.0.1
-### Update: Added clarity note
- 
-### Minor formatting improvement for readability
+## Project structure
+
+cpu-scheduler-simulator/
+├─ app.py
+├─ requirements.txt
+├─ README.md
+├─ templates/
+│ └─ index.html
+├─ static/
+│ ├─ js/
+│ │ └─ app.js
+│ └─ css/
+│ └─ style.css
+└─ .gitignore
+
+---
+
+## Requirements
+
+- Python 3.8+ (3.13 tested)
+- pip
+
+---
+
+## Run locally (Windows PowerShell)
+
+```powershell
+# from project root
+python -m venv venv
+# activate
+.\venv\Scripts\Activate.ps1
+# install deps
+pip install -r requirements.txt
+# run dev server
+python app.py
+# open http://127.0.0.1:5000 in your browser
+### Update: Documentation improved for clarity.
