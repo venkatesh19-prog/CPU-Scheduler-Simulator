@@ -1,3 +1,4 @@
+<!-- templates/index.html -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -32,7 +33,9 @@
             <option value="lowContext">Reduce context switches</option>
           </select>
 
-          <label class="checkbox"><input id="predict" type="checkbox" checked /> Enable prediction</label>
+          <label class="checkbox">
+            <input id="predict" type="checkbox" checked /> Enable prediction
+          </label>
 
           <div class="recommend" id="recommendBox">
             <div><strong>Recommendation:</strong> <span id="recAlgo">—</span></div>
@@ -42,8 +45,12 @@
 
           <div style="margin-top:12px">
             <table class="json-table" aria-label="Process table">
-              <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th></tr></thead>
-              <tbody id="jsonTableBody"><tr><td colspan="3" class="muted center small">No data</td></tr></tbody>
+              <thead>
+                <tr><th>PID</th><th>Arrival</th><th>Burst</th></tr>
+              </thead>
+              <tbody id="jsonTableBody">
+                <tr><td colspan="3" class="muted center small">No data</td></tr>
+              </tbody>
             </table>
           </div>
 
@@ -69,13 +76,17 @@
               <button id="resetBtn" class="btn">Reset</button>
 
               <label style="margin-left:8px">Speed:
-                <select id="speedSel"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
+                <select id="speedSel">
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
               </label>
 
               <button id="exportPNG" class="btn" title="Download PNG">Export PNG</button>
               <button id="downloadJSON" class="btn" title="Download schedule JSON">Download JSON</button>
 
-              <!-- moved here per your request -->
               <button id="loadSimple" class="btn">Load Simple</button>
               <button id="addRandom" class="btn">Add Random</button>
             </div>
@@ -99,7 +110,9 @@
             <div class="card-section">
               <h3>Processes</h3>
               <table class="proc-table">
-                <thead><tr><th>PID</th><th>Arr</th><th>Burst</th><th></th></tr></thead>
+                <thead>
+                  <tr><th>PID</th><th>Arr</th><th>Burst</th><th></th></tr>
+                </thead>
                 <tbody id="procTbody"></tbody>
               </table>
             </div>

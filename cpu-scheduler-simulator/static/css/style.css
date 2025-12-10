@@ -1,13 +1,21 @@
+/* static/css/style.css */
 :root{
-  --bg:#f6f8fa; --card:#fff; --muted:#6b7280; --accent:#ff3b58;
+  --bg:#f6f8fa;
+  --card:#fff;
+  --muted:#6b7280;
+  --accent:#ff3b58;
   --pad:14px;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{
   font-family:Inter,system-ui,Segoe UI,Roboto,Arial;
-  min-height:100vh; background:var(--bg); color:#0b1220;
-  display:flex; align-items:center; justify-content:center;
+  min-height:100vh;
+  background:var(--bg);
+  color:#0b1220;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   padding:18px;
 }
 
@@ -26,14 +34,22 @@ body{
 
 /* layout */
 .main{display:flex;gap:18px;align-items:flex-start}
-.sidebar{flex:0 0 300px; max-width:320px}
-.content{flex:1 1 auto; min-width:0}
+.sidebar{flex:0 0 300px;max-width:320px}
+.content{flex:1 1 auto;min-width:0}
 
 /* card */
-.card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 10px 30px rgba(11,17,32,0.04)}
+.card{
+  background:var(--card);
+  border-radius:12px;
+  padding:12px;
+  box-shadow:0 10px 30px rgba(11,17,32,0.04);
+}
 .panel{padding:8px}
 .controls-row{display:flex;gap:8px;flex-wrap:wrap}
-.btn{padding:8px 10px;border-radius:10px;border:1px solid rgba(15,23,42,0.06);background:#fff;cursor:pointer}
+.btn{
+  padding:8px 10px;border-radius:10px;border:1px solid rgba(15,23,42,0.06);
+  background:#fff;cursor:pointer;
+}
 .btn.primary{background:var(--accent);color:#fff;border:none}
 .btn.block{display:block;width:100%}
 
@@ -41,14 +57,24 @@ body{
 .json-table, .proc-table{width:100%;border-collapse:collapse}
 .json-table th, .proc-table th{font-weight:600;text-align:left;padding:8px;border-bottom:1px solid #f1f5f9}
 .json-table td, .proc-table td{padding:8px;border-bottom:1px solid #f8fafc}
-.muted{color:var(--muted)}.small{font-size:12px}.center{text-align:center}.right{text-align:right}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.center{text-align:center}
+.right{text-align:right}
 
 /* grid */
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
 
 /* gantt */
 #ganttWrap{position:relative;margin-top:12px}
-canvas#gantt{width:100%;height:220px;display:block;border-radius:10px;background:#fff;box-shadow:0 6px 18px rgba(11,17,32,0.03);}
+canvas#gantt{
+  width:100%;
+  height:220px;
+  display:block;
+  border-radius:10px;
+  background:#fff;
+  box-shadow:0 6px 18px rgba(11,17,32,0.03);
+}
 
 /* popup */
 .process-popup{position:absolute;pointer-events:none;display:none;z-index:60;transform-origin:center bottom}
