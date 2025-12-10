@@ -3,21 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Intelligent CPU Scheduler — Clean UI</title>
+  <title>Intelligent CPU Scheduler — Fixed UI</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <div class="page">
     <header class="header">
-      <h2>Intelligent CPU Scheduler — Responsive</h2>
-      <div class="sub">Interactive Gantt chart & smart recommendations</div>
+      <h1>Intelligent CPU Scheduler — Fixed UI</h1>
+      <p class="sub">Interactive Gantt • responsive layout • play/replay/popup</p>
     </header>
 
     <main class="main">
       <aside class="sidebar">
         <div class="panel">
-
-          <label class="label" for="mode">Mode</label>
+          <label class="label" for="mode">Algorithm</label>
           <select id="mode">
             <option value="ADAPTIVE">ADAPTIVE</option>
             <option value="FCFS">FCFS</option>
@@ -33,92 +34,72 @@
             <option value="lowContext">Reduce context switches</option>
           </select>
 
-          <label class="checkbox">
-            <input id="predict" type="checkbox" checked />
-            Enable prediction
-          </label>
+          <label class="checkbox"><input id="predict" type="checkbox" checked /> Enable prediction</label>
 
           <div class="recommend" id="recommendBox">
             <div><strong>Recommendation:</strong> <span id="recAlgo">—</span></div>
             <div class="muted" id="recReason">—</div>
-            <div class="small" style="margin-top:8px">Suggested RR quantum: <b id="recQuantum">-</b></div>
+            <div class="small">Suggested RR quantum: <b id="recQuantum">-</b></div>
           </div>
 
           <div class="controls-row">
-            <!-- sidebar play must be playSidebar to avoid ID conflict -->
             <button id="playSidebar" class="btn primary">Play</button>
             <button id="stepBack" class="btn">Step -</button>
             <button id="stepForward" class="btn">Step +</button>
             <button id="resetBtn" class="btn">Reset</button>
           </div>
 
-          <div class="panel mt-12">
+          <div style="margin-top:10px">
             <button id="loadSimple" class="btn block">Load Simple</button>
-
-            <!-- Process table (always shown) -->
-            <div class="json-table-wrap" style="margin-top:10px">
-              <table class="json-table">
-                <thead>
-                  <tr>
-                    <th>PID</th>
-                    <th>Arrival</th>
-                    <th>Burst</th>
-                  </tr>
-                </thead>
-                <tbody id="jsonTableBody">
-                  <tr><td colspan="3" class="muted center small">No data</td></tr>
-                </tbody>
-              </table>
-            </div>
-
+            <button id="addRandom" class="btn block">Add Random</button>
           </div>
+
+          <div class="json-table-wrap" style="margin-top:12px">
+            <table class="json-table">
+              <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th></tr></thead>
+              <tbody id="jsonTableBody"><tr><td colspan="3" class="muted center small">No data</td></tr></tbody>
+            </table>
+          </div>
+
+          <p class="small muted" style="margin-top:8px">
+            Tip: use <strong>RR</strong> for time-sharing; use <strong>SRTF</strong> to minimize turnaround for short jobs.
+          </p>
         </div>
       </aside>
 
       <section class="content">
         <div class="card">
           <div class="card-header">
-            <h4>Gantt & Timeline</h4>
+            <h2>Gantt & Timeline</h2>
             <div class="muted" id="tickLabel">Tick: 0 / 0</div>
           </div>
 
           <div id="ganttWrap" class="gantt-wrap">
-            <!-- Animated canvas + controls + popup -->
-            <div id="ganttSvgContainer">
-  <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-    <button id="playBtn" class="btn primary">Play ▶</button>
-    <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
-    <label style="margin-left:8px">Speed:
-      <select id="speedSel">
-        <option value="0.5">0.5x</option>
-        <option value="1" selected>1x</option>
-        <option value="1.5">1.5x</option>
-        <option value="2">2x</option>
-      </select>
-    </label>
-  </div>
+            <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+              <button id="playBtn" class="btn primary">Play ▶</button>
+              <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
+              <label style="margin-left:8px">Speed:
+                <select id="speedSel"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
+              </label>
+            </div>
 
-  <canvas id="gantt" height="160" style="width:100%;border-radius:8px;background:#fff"></canvas>
+            <canvas id="gantt" height="200"></canvas>
 
-  <!-- Popup overlay for active process -->
-  <div id="processPopup" class="process-popup" aria-hidden="true">
-    <div class="popup-inner">
-      <div class="popup-title" id="popupPid">P1</div>
-      <div class="popup-meta" id="popupMeta">Burst: 5  •  Start: 0</div>
-    </div>
-  </div>
-</div>
-            <!-- end gantt container -->
+            <div id="processPopup" class="process-popup" aria-hidden="true">
+              <div class="popup-inner"><div class="popup-title" id="popupPid">P1</div><div class="popup-meta" id="popupMeta">Burst: 5 • Start: 0</div></div>
+            </div>
           </div>
 
           <div class="grid-2">
             <div class="card-section">
-              <h5>Summary</h5>
+              <h3>Summary</h3>
               <div id="summaryBox">No data</div>
+              <h4 style="margin-top:12px">CPU Timeline</h4>
+              <canvas id="cpuChart" height="100"></canvas>
             </div>
 
             <div class="card-section">
-              <h5>Processes</h5>
+              <h3>Processes</h3>
               <table class="proc-table">
                 <thead><tr><th>PID</th><th>Arr</th><th>Burst</th><th></th></tr></thead>
                 <tbody id="procTbody"></tbody>
@@ -128,25 +109,17 @@
 
           <div class="card-footer">
             <div class="add-form">
-              <label>Arrival
-                <input id="inArrival" type="number" min="0" value="0" />
-              </label>
-
-              <label>Burst
-                <input id="inBurst" type="number" min="1" value="1" />
-              </label>
-
+              <label>Arrival<input id="inArrival" type="number" min="0" value="0" /></label>
+              <label>Burst<input id="inBurst" type="number" min="1" value="1" /></label>
               <button id="addProc" class="btn primary">Add</button>
               <button id="addSample" class="btn">Add Sample</button>
             </div>
           </div>
-
         </div>
       </section>
-
     </main>
   </div>
 
-  <script src="/static/js/app.js?v=3"></script>
+  <script src="/static/js/app.js?v=6"></script>
 </body>
 </html>

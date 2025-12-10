@@ -7,12 +7,10 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 
 
 def _deepcopy_procs(procs):
-    return [{ **p, "arrival": int(p["arrival"]), "burst": int(p["burst"]), "remaining": int(p.get("remaining", p["burst"])) } for p in procs]
+    return [{ **p, "arrival": int(p.get("arrival", 0)), "burst": int(p.get("burst", 1)), "remaining": int(p.get("remaining", p.get("burst", 1))) } for p in procs]
 
 
 def finalize(procs, events):
-    """Compute completion times, TAT, WT and summary metrics given procs and events[] where events are {time, pid} (pid may be None)."""
-    # completion time is last time index + 1 when pid seen
     completion = {}
     for ev in reversed(events):
         pid = ev["pid"]
@@ -31,7 +29,6 @@ def finalize(procs, events):
 
     busy = sum(1 for e in events if e["pid"] is not None)
     total_time = max(1, len(events))
-    # context switches: count transitions between different non-null pids (when pid changes and both are non-null)
     prev = None
     ctx = 0
     for e in events:
@@ -39,7 +36,7 @@ def finalize(procs, events):
             ctx += 1
         prev = e["pid"]
 
-    summary = {
+    return {
         "metrics": metrics_arr,
         "avgWaiting": sum(m["wt"] for m in metrics_arr)/max(1,len(metrics_arr)),
         "avgTurnaround": sum(m["tat"] for m in metrics_arr)/max(1,len(metrics_arr)),
@@ -49,7 +46,6 @@ def finalize(procs, events):
         "totalTime": total_time,
         "events": events
     }
-    return summary
 
 
 def simulate_fcfs(procs):
@@ -59,41 +55,33 @@ def simulate_fcfs(procs):
     t = 0
     for p in procs:
         if t < p["arrival"]:
-            # idle period
             for idle_t in range(t, p["arrival"]):
                 events.append({"time": idle_t, "pid": None})
             t = p["arrival"]
-        for i in range(p["burst"]):
+        for _ in range(p["burst"]):
             events.append({"time": t, "pid": p["pid"]})
             t += 1
     return finalize(procs, events)
 
 
 def simulate_srtf(procs):
-    # preemptive shortest remaining time first
     procs = _deepcopy_procs(procs)
-    n = len(procs)
     events = []
     t = 0
-    # use list of dicts for remaining
     while True:
         ready = [p for p in procs if p["arrival"] <= t and p["remaining"] > 0]
         if not ready:
-            # if all finished, break
             if all(p["remaining"] == 0 for p in procs):
                 break
-            # otherwise idle until next arrival
             next_arrivals = [p["arrival"] for p in procs if p["remaining"] > 0 and p["arrival"] > t]
             if not next_arrivals:
                 break
-            next_t = min(next_arrivals)
-            for idle_t in range(t, next_t):
+            nxt = min(next_arrivals)
+            for idle_t in range(t, nxt):
                 events.append({"time": idle_t, "pid": None})
-            t = next_t
+            t = nxt
             continue
-        # pick process with smallest remaining, tie by arrival then pid
         cur = min(ready, key=lambda p: (p["remaining"], p["arrival"], p["pid"]))
-        # run for 1 time unit (preemptive)
         events.append({"time": t, "pid": cur["pid"]})
         cur["remaining"] -= 1
         t += 1
@@ -109,7 +97,6 @@ def simulate_rr(procs, quantum=2):
     i = 0
     rem = {p["pid"]: p["remaining"] for p in procs}
     while i < len(procs) or q:
-        # enqueue newly arrived
         while i < len(procs) and procs[i]["arrival"] <= t:
             q.append(procs[i])
             i += 1
@@ -127,10 +114,8 @@ def simulate_rr(procs, quantum=2):
         for _ in range(run):
             events.append({"time": t, "pid": cur["pid"]})
             t += 1
-            # enqueue any arrivals during run
             while i < len(procs) and procs[i]["arrival"] <= t:
-                q.append(procs[i])
-                i += 1
+                q.append(procs[i]); i += 1
         rem[cur["pid"]] -= run
         if rem[cur["pid"]] > 0:
             q.append(cur)
@@ -138,20 +123,16 @@ def simulate_rr(procs, quantum=2):
 
 
 def simulate_adaptive(procs, quantum=2):
-    # simple adaptive: pick SRTF if burst variance high, else RR when many processes else FCFS
-    stats = None
-    if procs:
-        bursts = [int(p["burst"]) for p in procs]
-        avg = sum(bursts)/len(bursts)
-        var = sum((b-avg)**2 for b in bursts)/len(bursts)
-        std = var**0.5
-        stats = {"avg": avg, "std": std, "n": len(bursts)}
-    if stats:
-        if stats["std"] / max(1, stats["avg"]) > 0.6:
-            return simulate_srtf(procs)
-        if stats["n"] > 6:
-            return simulate_rr(procs, quantum)
-    # default to FCFS
+    if not procs:
+        return simulate_fcfs(procs)
+    bursts = [int(p["burst"]) for p in procs]
+    avg = sum(bursts)/len(bursts)
+    var = sum((b-avg)**2 for b in bursts)/len(bursts)
+    std = var**0.5
+    if std / max(1, avg) > 0.6:
+        return simulate_srtf(procs)
+    if len(bursts) > 6:
+        return simulate_rr(procs, quantum)
     return simulate_fcfs(procs)
 
 
@@ -167,21 +148,17 @@ def simulate():
     quantum = int(data.get("quantum", 2))
     procs = data.get("processes", [])
 
-    # validate input
     if not isinstance(procs, list):
         return jsonify({"error": "processes must be a list"}), 400
-    # normalize pids if missing
+
     for idx, p in enumerate(procs, start=1):
-        if "pid" not in p:
-            p["pid"] = f"P{idx}"
-        if "arrival" not in p:
-            p["arrival"] = 0
-        if "burst" not in p:
-            p["burst"] = 1
+        p.setdefault("pid", f"P{idx}")
+        p.setdefault("arrival", 0)
+        p.setdefault("burst", 1)
 
     if algorithm == "FCFS":
         res = simulate_fcfs(procs)
-    elif algorithm == "SRTF" or algorithm == "SJF":
+    elif algorithm in ("SRTF", "SJF"):
         res = simulate_srtf(procs)
     elif algorithm == "RR":
         res = simulate_rr(procs, quantum)
@@ -190,7 +167,6 @@ def simulate():
     else:
         return jsonify({"error": f"Unknown algorithm '{algorithm}'"}), 400
 
-    # respond with events and metrics in shape frontend expects
     return jsonify({
         "events": res["events"],
         "metrics": {
