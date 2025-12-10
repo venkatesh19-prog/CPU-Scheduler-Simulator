@@ -45,7 +45,8 @@
           </div>
 
           <div class="controls-row">
-            <button id="playBtn" class="btn primary">Play</button>
+            <!-- sidebar play must be playSidebar to avoid ID conflict -->
+            <button id="playSidebar" class="btn primary">Play</button>
             <button id="stepBack" class="btn">Step -</button>
             <button id="stepForward" class="btn">Step +</button>
             <button id="resetBtn" class="btn">Reset</button>
@@ -82,6 +83,7 @@
           </div>
 
           <div id="ganttWrap" class="gantt-wrap">
+            <!-- REPLACE/INSERT: animated canvas + controls + popup -->
             <div id="ganttSvgContainer">
   <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
     <button id="playBtn" class="btn primary">Play ▶</button>
@@ -96,9 +98,17 @@
     </label>
   </div>
 
-  <canvas id="gantt" height="140" style="width:100%;border-radius:8px;background:#fff"></canvas>
-</div>
+  <canvas id="gantt" height="160" style="width:100%;border-radius:8px;background:#fff"></canvas>
 
+  <!-- Popup overlay for active process -->
+  <div id="processPopup" class="process-popup" aria-hidden="true">
+    <div class="popup-inner">
+      <div class="popup-title" id="popupPid">P1</div>
+      <div class="popup-meta" id="popupMeta">Burst: 5  •  Start: 0</div>
+    </div>
+  </div>
+</div>
+            <!-- end gantt container -->
           </div>
 
           <div class="grid-2">
@@ -140,6 +150,3 @@
   <script src="/static/js/app.js"></script>
 </body>
 </html>
-
-<!-- accessibility: labels added for screen readers -->
-

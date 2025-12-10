@@ -1,5 +1,5 @@
 // static/js/app.js
-// Clean frontend scheduler: no import/export JSON, keeps table and UI controls.
+// Clean frontend scheduler: scheduling engines + SVG Gantt + animated canvas gantt with popup
 
 (function () {
   /* ---------- Helpers ---------- */
@@ -24,7 +24,7 @@
   let metrics = null;
   let tick = 0;
   let interval = null;
-  let speed = 250; // ms per tick
+  let speed = 250; // ms per tick used by sidebar play
   const ganttContainer = $("#ganttSvgContainer");
 
   /* ---------- Analysis / Recommendation ---------- */
@@ -162,7 +162,6 @@
     }));
   }
 
-  // keep a small table in the sidebar showing processes for quick view
   function refreshSidebarTable() {
     const t = $("#jsonTableBody");
     if (!t) return;
@@ -207,7 +206,6 @@
     }
     // Use animated Gantt if available (drawGanttAnimated expects schedule array [start,end,pid])
     if (typeof drawGanttAnimated === 'function' && metrics) {
-      // convert events -> schedule (merged blocks)
       const blocks = [];
       for (let i=0;i<events.length;i++){
         const e = events[i];
@@ -215,7 +213,6 @@
         else blocks[blocks.length-1].end = e.time+1;
       }
       const schedule = blocks.map(b => [b.start, b.end, b.pid]);
-      // call animated renderer
       drawGanttAnimated(schedule);
     } else {
       renderGantt();
@@ -290,7 +287,7 @@
     cursor.setAttribute("stroke", "#111"); cursor.setAttribute("stroke-width","2");
     svg.appendChild(cursor);
 
-    cont.appendChild(svg);
+    ganttContainer.appendChild(svg);
   }
 
   /* ---------- Controls handlers ---------- */
@@ -340,7 +337,7 @@
       recompute();
     });
 
-    // NOTE: this listens to sidebar play button -> rename your sidebar button to id="playSidebar"
+    // NOTE: listens to sidebar play button -> must be id="playSidebar"
     const sidebarPlay = $("#playSidebar");
     if (sidebarPlay) {
       sidebarPlay.addEventListener("click", ()=>{
@@ -375,9 +372,7 @@
     const inp = $("#inArrival");
     if (inp) inp.focus();
     window.addEventListener("resize", () => {
-      // redraw whichever Gantt is active
       if (typeof drawGanttAnimated === 'function' && metrics) {
-        // rebuild schedule and redraw
         const blocks = [];
         for (let i=0;i<events.length;i++){
           const e = events[i];
@@ -398,30 +393,23 @@
 
   init();
 
-  /*
-    Visualization Notes:
-    This block explains how the Gantt Chart SVG is rendered.
-    - Each event is converted into a block (start ? end)
-    - Active process highlighted using a tick marker
-  */
-
-  /* ---------- Animated Canvas Gantt (drawGanttAnimated) ---------- */
+  /* ---------- Animated Canvas Gantt with popup & synced controls ---------- */
   (function(){
-    // animated gantt expects DOM elements inside the gantt container:
-    // #gantt (canvas), #playBtn, #pauseBtn, #speedSel
     const canvas = document.getElementById("gantt");
     const playBtn = document.getElementById("playBtn");
     const pauseBtn = document.getElementById("pauseBtn");
     const speedSel = document.getElementById("speedSel");
-    if (!canvas || !playBtn || !pauseBtn || !speedSel) {
-      // not present — skip registering animated renderer
-      return;
-    }
+    const popup = document.getElementById("processPopup");
+    const popupPid = document.getElementById("popupPid");
+    const popupMeta = document.getElementById("popupMeta");
+    const sidebarPlay = document.getElementById("playSidebar");
+
+    if (!canvas || !playBtn || !pauseBtn || !speedSel) return;
 
     const ctx = canvas.getContext("2d", { alpha: false });
     const padding = { left: 60, right: 20, top: 18, bottom: 30 };
     const trackHeight = 22;
-    const trackGap = 8;
+    const trackGap = 10;
     const barRadius = 6;
 
     let animState = {
@@ -434,14 +422,16 @@
       lastFrameTs: null,
       pidRows: [],
       canvasWidth: 0,
-      canvasHeight: 0
+      canvasHeight: 0,
+      lastActivePid: null
     };
 
     function colorForPid(pid) {
+      if (!pid) return "#d1d5db";
       let hash = 0;
-      for (let i = 0; i < (pid ? pid.length : 1); i++) hash = (pid ? pid.charCodeAt(i) : i) + ((hash << 5) - hash);
+      for (let i=0;i<pid.length;i++) hash = pid.charCodeAt(i) + ((hash<<5)-hash);
       const h = Math.abs(hash) % 360;
-      return `hsl(${h}deg 70% 60%)`;
+      return `hsl(${h}deg 72% 56%)`;
     }
 
     function prepareSchedule(schedule) {
@@ -484,86 +474,107 @@
       animState.canvasHeight = rect.height;
 
       const { pidRows, start, end } = meta;
-
+      ctx.clearRect(0,0,rect.width,rect.height);
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.fillRect(0,0,rect.width,rect.height);
 
-      ctx.fillStyle = "#0f172a";
+      ctx.fillStyle = "#0b1220";
       ctx.font = "600 14px Arial";
-      ctx.fillText("Time →", 6, padding.top + 6);
+      ctx.fillText("Time →", 8, padding.top + 6);
 
       pidRows.forEach(rowInfo => {
-        const y = padding.top + 24 + rowInfo.row * (trackHeight + trackGap);
-        ctx.fillStyle = "#0f172a";
+        const y = padding.top + 28 + rowInfo.row * (trackHeight + trackGap);
+        ctx.fillStyle = "#0b1220";
         ctx.font = "600 12px Arial";
-        ctx.fillText(rowInfo.pid, 8, y + trackHeight / 2 + 1);
+        ctx.fillText(rowInfo.pid, 8, y + trackHeight / 2 + 2);
 
-        ctx.fillStyle = "#fbfdff";
+        ctx.fillStyle = "#f8fafc";
         const x0 = padding.left;
         const w = rect.width - padding.left - padding.right;
         ctx.fillRect(x0, y, w, trackHeight);
       });
 
       schedule.forEach(seg => {
-        const [s, e, pid] = seg;
-        if (pid === null) return;
-        const rowInfo = pidRows.find(p => p.pid === pid);
-        if (!rowInfo) return;
-        const row = rowInfo.row;
-        const y = padding.top + 24 + row * (trackHeight + trackGap);
+        const [s,e,pid] = seg;
+        const rowInfo = pid === null ? null : pidRows.find(p => p.pid === pid);
+        const y = pid === null ? (padding.top + 28 + (pidRows.length * (trackHeight + trackGap))) : padding.top + 28 + (rowInfo.row * (trackHeight + trackGap));
         const x1 = timeToX(s, start, end, rect.width);
         const x2 = timeToX(e, start, end, rect.width);
         const w = Math.max(1, x2 - x1);
 
-        ctx.fillStyle = rowInfo.color;
-        ctx.globalAlpha = 1;
-        roundRect(ctx, x1, y + 2, w, trackHeight - 4, barRadius);
+        ctx.fillStyle = pid === null ? "#e5e7eb" : rowInfo.color;
+        ctx.globalAlpha = pid === null ? 0.6 : 1;
+        roundRect(ctx, x1, y+2, w, trackHeight-4, barRadius);
 
         if (w > 40) {
           ctx.fillStyle = "#fff";
           ctx.font = "600 11px Arial";
           ctx.textAlign = "center";
-          ctx.fillText(pid + ` (${s}-${e})`, x1 + w / 2, y + trackHeight / 2 + 1);
+          ctx.fillText(pid ? `${pid} (${s}-${e})` : "idle", x1 + w/2, y + trackHeight/2 + 2);
         } else {
-          ctx.fillStyle = "#111827";
+          ctx.fillStyle = "#0b1220";
           ctx.font = "11px Arial";
           ctx.textAlign = "left";
-          ctx.fillText(pid, x2 + 6, y + trackHeight / 2 + 1);
+          ctx.fillText(pid || "idle", x2 + 6, y + trackHeight/2 + 2);
         }
       });
 
       ctx.fillStyle = "#374151";
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
-      const ticks = Math.min(10, Math.ceil((meta.end - meta.start)));
-      for (let i = 0; i <= ticks; i++) {
-        const t = meta.start + (i / ticks) * (meta.end - meta.start);
+      const ticks = Math.min(12, Math.ceil((meta.end - meta.start)));
+      for (let i=0;i<=ticks;i++){
+        const t = meta.start + (i/ticks)*(meta.end - meta.start);
         const x = timeToX(t, meta.start, meta.end, rect.width);
-        ctx.fillRect(x - 0.5, padding.top + 12, 1, 6);
+        ctx.fillRect(x-0.5, padding.top + 12, 1, 6);
         ctx.fillText(Math.round(t).toString(), x, padding.top + 6);
       }
-
       ctx.globalAlpha = 1;
     }
 
     function renderFrame(anim) {
       renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.startTime, end: anim.endTime });
-      const executedX = timeToX(anim.currentTime, anim.startTime, anim.endTime, animState.canvasWidth);
-      ctx.fillStyle = "rgba(0,0,0,0.03)";
-      ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, animState.canvasHeight - padding.top - padding.bottom - 24);
+      const executedX = timeToX(anim.currentTime, anim.startTime, anim.endTime, anim.canvasWidth);
+      ctx.fillStyle = "rgba(2,6,23,0.04)";
+      ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, anim.canvasHeight - padding.top - padding.bottom - 24);
 
       ctx.beginPath();
       ctx.strokeStyle = "#ff253f";
       ctx.lineWidth = 2;
-      ctx.moveTo(executedX + 0.5, padding.top + 12);
-      ctx.lineTo(executedX + 0.5, animState.canvasHeight - padding.bottom + 6);
+      ctx.moveTo(executedX + 0.5, padding.top + 8);
+      ctx.lineTo(executedX + 0.5, anim.canvasHeight - padding.bottom + 6);
       ctx.stroke();
 
-      ctx.fillStyle = "#111827";
+      ctx.fillStyle = "#0b1220";
       ctx.font = "600 12px Arial";
       ctx.textAlign = "center";
-      const timeLabel = anim.currentTime.toFixed(2);
-      ctx.fillText(timeLabel, executedX, padding.top + 2);
+      ctx.fillText(anim.currentTime.toFixed(2), executedX, padding.top + 2);
+    }
+
+    function showPopupForPid(pid, start, burst, canvasRect, pidRowsMeta) {
+      if (!popup) return;
+      if (!pid) return;
+      const rowInfo = pidRowsMeta.find(p => p.pid === pid);
+      if (!rowInfo) return;
+      const x1 = timeToX(start, animState.startTime, animState.endTime, canvasRect.width);
+      const x2 = timeToX(start + burst, animState.startTime, animState.endTime, canvasRect.width);
+      const centerX = Math.round((x1 + x2) / 2);
+      const y = padding.top + 28 + rowInfo.row * (trackHeight + trackGap);
+      const top = canvasRect.top + window.scrollY + Math.max(6, y - 36);
+      const left = canvasRect.left + centerX - 60;
+      popup.style.left = `${Math.max(8, left)}px`;
+      popup.style.top = `${top}px`;
+      popupPid.innerText = pid;
+      popupMeta.innerText = `Burst: ${burst}  •  Start: ${start}`;
+      popup.classList.remove("pop");
+      void popup.offsetWidth;
+      popup.classList.add("pop");
+      popup.setAttribute("aria-hidden","false");
+      clearTimeout(popup._hideTimer);
+      popup._hideTimer = setTimeout(()=> {
+        popup.classList.remove("pop");
+        popup.setAttribute("aria-hidden","true");
+      }, 1200);
     }
 
     function animationLoop(ts) {
@@ -575,12 +586,27 @@
       const dtSecs = (dtMs / 1000) * animState.speed;
       animState.currentTime += dtSecs;
 
+      if (animState.schedule) {
+        const canvasRect = canvas.getBoundingClientRect();
+        for (let i=0;i<animState.schedule.length;i++){
+          const seg = animState.schedule[i];
+          const segStart = seg[0];
+          const segEnd = seg[1];
+          const pid = seg[2];
+          if (animState.currentTime >= segStart && animState.currentTime - dtSecs < segStart) {
+            showPopupForPid(pid, segStart, segEnd-segStart, canvasRect, animState.pidRows);
+            animState.lastActivePid = pid;
+          }
+        }
+      }
+
       if (animState.currentTime >= animState.endTime) {
         animState.currentTime = animState.endTime;
         renderFrame(animState);
         animState.playing = false;
         playBtn.disabled = false;
         pauseBtn.disabled = true;
+        if (sidebarPlay) sidebarPlay.innerText = "Play";
         return;
       }
 
@@ -594,7 +620,6 @@
         ctx.clearRect(0,0,rect.width,rect.height);
         return;
       }
-
       const meta = prepareSchedule(schedule);
       animState.schedule = schedule;
       animState.pidRows = meta.pidRows;
@@ -604,6 +629,7 @@
       animState.speed = parseFloat(speedSel.value) || 1;
       animState.playing = false;
       animState.lastFrameTs = null;
+      animState.lastActivePid = null;
 
       renderStatic(schedule, meta);
       renderFrame(animState);
@@ -611,12 +637,16 @@
       playBtn.disabled = false;
       pauseBtn.disabled = true;
 
+      if (sidebarPlay) sidebarPlay.innerText = "Play";
+
       playBtn.onclick = function() {
+        if (!animState.schedule) return;
         if (animState.currentTime >= animState.endTime) animState.currentTime = animState.startTime;
         animState.playing = true;
         animState.speed = parseFloat(speedSel.value) || 1;
         playBtn.disabled = true;
         pauseBtn.disabled = false;
+        if (sidebarPlay) sidebarPlay.innerText = "Pause";
         requestAnimationFrame(animationLoop);
       };
 
@@ -624,11 +654,30 @@
         animState.playing = false;
         playBtn.disabled = false;
         pauseBtn.disabled = true;
+        if (sidebarPlay) sidebarPlay.innerText = "Play";
       };
 
-      speedSel.onchange = function() {
-        animState.speed = parseFloat(speedSel.value) || 1;
-      };
+      speedSel.onchange = function() { animState.speed = parseFloat(speedSel.value) || 1; };
+
+      if (sidebarPlay) {
+        sidebarPlay.onclick = function() {
+          if (!animState.schedule) return;
+          if (animState.playing) {
+            animState.playing = false;
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            sidebarPlay.innerText = "Play";
+          } else {
+            if (animState.currentTime >= animState.endTime) animState.currentTime = animState.startTime;
+            animState.playing = true;
+            animState.speed = parseFloat(speedSel.value) || 1;
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+            sidebarPlay.innerText = "Pause";
+            requestAnimationFrame(animationLoop);
+          }
+        };
+      }
     };
   })();
 
