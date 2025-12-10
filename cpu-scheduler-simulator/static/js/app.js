@@ -1,6 +1,5 @@
 // static/js/app.js
 if (window.__schedulerAppLoaded) {
-  // avoid double initialization if script is loaded twice
   console.warn("schedulerApp already loaded - skipping second initialization");
 } else {
   window.__schedulerAppLoaded = true;
@@ -25,7 +24,6 @@ if (window.__schedulerAppLoaded) {
     let enablePrediction = true;
     let events = [], metrics = null, tick = 0;
 
-    /* helpers */
     function analyze(ps) {
       if (!ps || ps.length===0) return null;
       const bursts = ps.map(p=>p.burst);
@@ -34,7 +32,6 @@ if (window.__schedulerAppLoaded) {
       const std = Math.sqrt(variance);
       return { n:ps.length, avg, variance, std };
     }
-
     function recommend(ps,g=null) {
       const stats = analyze(ps);
       if (!stats) return {algo:"FCFS", reason:"no processes"};
@@ -45,14 +42,12 @@ if (window.__schedulerAppLoaded) {
       if (stats.n > 6) return {algo:"RR", reason:"Many processes"};
       return {algo:"FCFS", reason:"Default heuristic"};
     }
-
     function suggestQuantum(ps) {
       const s = analyze(ps);
       if (!s) return 4;
       return Math.min(10, Math.max(2, Math.round(s.avg)));
     }
 
-    /* backend simulate (preferred) fallback local */
     async function backendSimulate() {
       const body = { algorithm: mode, quantum: suggestQuantum(processes), processes };
       try {
@@ -81,7 +76,6 @@ if (window.__schedulerAppLoaded) {
       metrics = { totalTime: ev.length, events: ev, avgWaiting:0, avgTurnaround:0, cpuUtil:100, throughput:0, contextSwitches:0, processMetrics:[] };
     }
 
-    /* UI wiring */
     function renderProcTable() {
       const tbody = $("#procTbody");
       tbody.innerHTML = "";
@@ -150,7 +144,7 @@ if (window.__schedulerAppLoaded) {
         const minH = 160;
         const cssH = Math.max(minH, estimated);
         canvas.style.height = cssH + "px";
-        resizeCanvas(); // update internal pixel buffer
+        resizeCanvas();
       }
 
       function resizeCanvas() {
@@ -221,7 +215,6 @@ if (window.__schedulerAppLoaded) {
       function renderFrame() {
         if (!anim.schedule) return;
         renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
-        // highlight active: draw lifted bar overlay for current segment
         const active = anim.schedule.find(seg => (anim.current >= seg[0] && anim.current < seg[1]));
         if (active) {
           const [s,e,pid] = active;
@@ -235,7 +228,6 @@ if (window.__schedulerAppLoaded) {
           roundRect(ctx, x1, liftedY+2, w, trackH-4, radius);
           ctx.restore();
         }
-        // progress shade and cursor
         const executedX = timeToX(anim.current, anim.start, anim.end, anim.width);
         ctx.fillStyle = "rgba(2,6,23,0.04)";
         ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, anim.height - padding.top - padding.bottom - 24);
@@ -256,7 +248,6 @@ if (window.__schedulerAppLoaded) {
         const suggestedTop = canvasRect.top + window.scrollY + Math.max(6, y - 36 - LIFT);
         const suggestedLeft = canvasRect.left + centerX - 60;
 
-        // measure popup (temporarily ensure it's renderable)
         popup.style.display = "block";
         popup.style.left = "-9999px";
         popup.style.top = "-9999px";
@@ -302,7 +293,6 @@ if (window.__schedulerAppLoaded) {
         requestAnimationFrame(loop);
       }
 
-      // export PNG
       exportPNG && exportPNG.addEventListener('click', ()=> {
         if (!anim.schedule) return alert('Nothing to export');
         const tmp = document.createElement('canvas');
@@ -313,7 +303,6 @@ if (window.__schedulerAppLoaded) {
         const a = document.createElement('a'); a.href = data; a.download = 'gantt.png'; a.click();
       });
 
-      // download JSON
       downloadJSON && downloadJSON.addEventListener('click', ()=> {
         if (!anim.schedule) return alert('No schedule to download');
         const payload = { schedule: anim.schedule, start: anim.start, end: anim.end, generated: new Date().toISOString() };
@@ -330,7 +319,6 @@ if (window.__schedulerAppLoaded) {
         anim.current = meta.start;
         anim.speed = parseFloat(speedSel.value) || 1;
         anim.playing = false; anim.lastTs = null;
-        // set canvas height according to rows
         setCanvasHeightForRows(meta.pidRows.length || 1);
         renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
         renderFrame();
@@ -354,14 +342,12 @@ if (window.__schedulerAppLoaded) {
           };
         }
 
-        // ensure correct sizing immediately
         setTimeout(()=> { resizeCanvas(); renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); }, 30);
       };
 
       window.addEventListener('resize', ()=> { if (anim.schedule) { resizeCanvas(); renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); } });
     })();
 
-    /* main wiring */
     function recompute() { backendSimulate(); }
 
     function updateUI() {
