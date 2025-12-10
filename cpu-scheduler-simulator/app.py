@@ -1,152 +1,210 @@
+# app.py
 from flask import Flask, request, jsonify, render_template
+import os
 from collections import deque
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static", template_folder="templates")
 
-def compute_metrics(schedule, processes):
-    completion = {pid: None for pid in processes}
-    for start, end, pid in schedule:
-        if pid is None:
+
+def _deepcopy_procs(procs):
+    return [{ **p, "arrival": int(p["arrival"]), "burst": int(p["burst"]), "remaining": int(p.get("remaining", p["burst"])) } for p in procs]
+
+
+def finalize(procs, events):
+    """Compute completion times, TAT, WT and summary metrics given procs and events[] where events are {time, pid} (pid may be None)."""
+    # completion time is last time index + 1 when pid seen
+    completion = {}
+    for ev in reversed(events):
+        pid = ev["pid"]
+        if pid is None: 
             continue
-        completion[pid] = end
-    turnaround = {}
-    waiting = {}
-    for pid, p in processes.items():
-        t = completion[pid]
-        turnaround[pid] = t - p['arrival']
-        waiting[pid] = turnaround[pid] - p['burst']
-    avg_turnaround = sum(turnaround.values()) / len(turnaround) if turnaround else 0
-    avg_waiting = sum(waiting.values()) / len(waiting) if waiting else 0
-    return {
-        "completion": completion,
-        "turnaround": turnaround,
-        "waiting": waiting,
-        "avg_turnaround": avg_turnaround,
-        "avg_waiting": avg_waiting
-    }
+        if pid not in completion:
+            completion[pid] = ev["time"] + 1
 
-def fcfs(procs):
-    schedule = []
-    time = 0
-    procs = sorted(procs, key=lambda x: x['arrival'])
+    metrics_arr = []
     for p in procs:
-        if time < p['arrival']:
-            schedule.append((time, p['arrival'], None))
-            time = p['arrival']
-        schedule.append((time, time + p['burst'], p['pid']))
-        time += p['burst']
-    return schedule
+        pid = p["pid"]
+        ct = completion.get(pid, 0)
+        tat = ct - p["arrival"]
+        wt = tat - p["burst"]
+        metrics_arr.append({"pid": pid, "arrival": p["arrival"], "burst": p["burst"], "completion": ct, "tat": tat, "wt": wt})
 
-def sjf(procs):
-    remaining = sorted(procs, key=lambda x: x['arrival'])
-    schedule = []
-    time = 0
-    while remaining:
-        available = [p for p in remaining if p['arrival'] <= time]
-        if not available:
-            nxt = min(remaining, key=lambda x: x['arrival'])
-            schedule.append((time, nxt['arrival'], None))
-            time = nxt['arrival']
+    busy = sum(1 for e in events if e["pid"] is not None)
+    total_time = max(1, len(events))
+    # context switches: count transitions between different non-null pids (when pid changes and both are non-null)
+    prev = None
+    ctx = 0
+    for e in events:
+        if e["pid"] != prev and prev is not None and e["pid"] is not None:
+            ctx += 1
+        prev = e["pid"]
+
+    summary = {
+        "metrics": metrics_arr,
+        "avgWaiting": sum(m["wt"] for m in metrics_arr)/max(1,len(metrics_arr)),
+        "avgTurnaround": sum(m["tat"] for m in metrics_arr)/max(1,len(metrics_arr)),
+        "throughput": len(metrics_arr) / total_time,
+        "cpuUtil": (busy / total_time) * 100,
+        "contextSwitches": ctx,
+        "totalTime": total_time,
+        "events": events
+    }
+    return summary
+
+
+def simulate_fcfs(procs):
+    procs = _deepcopy_procs(procs)
+    procs.sort(key=lambda p: (p["arrival"], p["pid"]))
+    events = []
+    t = 0
+    for p in procs:
+        if t < p["arrival"]:
+            # idle period
+            for idle_t in range(t, p["arrival"]):
+                events.append({"time": idle_t, "pid": None})
+            t = p["arrival"]
+        for i in range(p["burst"]):
+            events.append({"time": t, "pid": p["pid"]})
+            t += 1
+    return finalize(procs, events)
+
+
+def simulate_srtf(procs):
+    # preemptive shortest remaining time first
+    procs = _deepcopy_procs(procs)
+    n = len(procs)
+    events = []
+    t = 0
+    # use list of dicts for remaining
+    while True:
+        ready = [p for p in procs if p["arrival"] <= t and p["remaining"] > 0]
+        if not ready:
+            # if all finished, break
+            if all(p["remaining"] == 0 for p in procs):
+                break
+            # otherwise idle until next arrival
+            next_arrivals = [p["arrival"] for p in procs if p["remaining"] > 0 and p["arrival"] > t]
+            if not next_arrivals:
+                break
+            next_t = min(next_arrivals)
+            for idle_t in range(t, next_t):
+                events.append({"time": idle_t, "pid": None})
+            t = next_t
             continue
-        p = min(available, key=lambda x: x['burst'])
-        schedule.append((time, time + p['burst'], p['pid']))
-        time += p['burst']
-        remaining.remove(p)
-    return schedule
+        # pick process with smallest remaining, tie by arrival then pid
+        cur = min(ready, key=lambda p: (p["remaining"], p["arrival"], p["pid"]))
+        # run for 1 time unit (preemptive)
+        events.append({"time": t, "pid": cur["pid"]})
+        cur["remaining"] -= 1
+        t += 1
+    return finalize(procs, events)
 
-def round_robin(procs, quantum):
-    procs = sorted(procs, key=lambda x: x['arrival'])
-    time = 0
-    schedule = []
+
+def simulate_rr(procs, quantum=2):
+    procs = _deepcopy_procs(procs)
+    procs.sort(key=lambda p: (p["arrival"], p["pid"]))
+    events = []
+    t = 0
     q = deque()
     i = 0
-    rem = {p['pid']: p['burst'] for p in procs}
+    rem = {p["pid"]: p["remaining"] for p in procs}
     while i < len(procs) or q:
-        while i < len(procs) and procs[i]['arrival'] <= time:
+        # enqueue newly arrived
+        while i < len(procs) and procs[i]["arrival"] <= t:
             q.append(procs[i])
             i += 1
         if not q:
             if i < len(procs):
-                nxt = procs[i]['arrival']
-                schedule.append((time, nxt, None))
-                time = nxt
-            continue
-        p = q.popleft()
-        run_time = min(quantum, rem[p['pid']])
-        schedule.append((time, time + run_time, p['pid']))
-        time += run_time
-        rem[p['pid']] -= run_time
-        while i < len(procs) and procs[i]['arrival'] <= time:
-            q.append(procs[i])
-            i += 1
-        if rem[p['pid']] > 0:
-            q.append(p)
-    return schedule
+                nxt = procs[i]["arrival"]
+                for idle_t in range(t, nxt):
+                    events.append({"time": idle_t, "pid": None})
+                t = nxt
+                continue
+            else:
+                break
+        cur = q.popleft()
+        run = min(quantum, rem[cur["pid"]])
+        for _ in range(run):
+            events.append({"time": t, "pid": cur["pid"]})
+            t += 1
+            # enqueue any arrivals during run
+            while i < len(procs) and procs[i]["arrival"] <= t:
+                q.append(procs[i])
+                i += 1
+        rem[cur["pid"]] -= run
+        if rem[cur["pid"]] > 0:
+            q.append(cur)
+    return finalize(procs, events)
 
-def priority_scheduling(procs):
-    remaining = sorted(procs, key=lambda x: x['arrival'])
-    schedule = []
-    time = 0
-    while remaining:
-        available = [p for p in remaining if p['arrival'] <= time]
-        if not available:
-            nxt = min(remaining, key=lambda x: x['arrival'])
-            schedule.append((time, nxt['arrival'], None))
-            time = nxt['arrival']
-            continue
-        p = min(available, key=lambda x: x['priority'])
-        schedule.append((time, time + p['burst'], p['pid']))
-        time += p['burst']
-        remaining.remove(p)
-    return schedule
+
+def simulate_adaptive(procs, quantum=2):
+    # simple adaptive: pick SRTF if burst variance high, else RR when many processes else FCFS
+    stats = None
+    if procs:
+        bursts = [int(p["burst"]) for p in procs]
+        avg = sum(bursts)/len(bursts)
+        var = sum((b-avg)**2 for b in bursts)/len(bursts)
+        std = var**0.5
+        stats = {"avg": avg, "std": std, "n": len(bursts)}
+    if stats:
+        if stats["std"] / max(1, stats["avg"]) > 0.6:
+            return simulate_srtf(procs)
+        if stats["n"] > 6:
+            return simulate_rr(procs, quantum)
+    # default to FCFS
+    return simulate_fcfs(procs)
+
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
 @app.route("/simulate", methods=["POST"])
 def simulate():
-    data = request.json
-    algorithm = data.get("algorithm")
+    data = request.get_json(force=True)
+    algorithm = (data.get("algorithm") or "ADAPTIVE").upper()
     quantum = int(data.get("quantum", 2))
     procs = data.get("processes", [])
 
-    proc_map = {p["pid"]: {"arrival": int(p["arrival"]), "burst": int(p["burst"])} for p in procs}
-    for p in procs:
-        p["arrival"] = int(p["arrival"])
-        p["burst"] = int(p["burst"])
-        p["priority"] = int(p.get("priority", 0))
+    # validate input
+    if not isinstance(procs, list):
+        return jsonify({"error": "processes must be a list"}), 400
+    # normalize pids if missing
+    for idx, p in enumerate(procs, start=1):
+        if "pid" not in p:
+            p["pid"] = f"P{idx}"
+        if "arrival" not in p:
+            p["arrival"] = 0
+        if "burst" not in p:
+            p["burst"] = 1
 
     if algorithm == "FCFS":
-        schedule = fcfs(procs)
-    elif algorithm == "SJF":
-        schedule = sjf(procs)
+        res = simulate_fcfs(procs)
+    elif algorithm == "SRTF" or algorithm == "SJF":
+        res = simulate_srtf(procs)
     elif algorithm == "RR":
-        schedule = round_robin(procs, quantum)
-    elif algorithm == "PRIORITY":
-        schedule = priority_scheduling(procs)
+        res = simulate_rr(procs, quantum)
+    elif algorithm == "ADAPTIVE":
+        res = simulate_adaptive(procs, quantum)
     else:
-        return jsonify({"error": "Unknown algorithm"}), 400
+        return jsonify({"error": f"Unknown algorithm '{algorithm}'"}), 400
 
-    metrics = compute_metrics(schedule, proc_map)
-    return jsonify({"schedule": schedule, "metrics": metrics})
+    # respond with events and metrics in shape frontend expects
+    return jsonify({
+        "events": res["events"],
+        "metrics": {
+            "avgWaiting": res["avgWaiting"],
+            "avgTurnaround": res["avgTurnaround"],
+            "cpuUtil": res["cpuUtil"],
+            "throughput": res["throughput"],
+            "contextSwitches": res["contextSwitches"],
+            "totalTime": res["totalTime"],
+            "processMetrics": res["metrics"]
+        }
+    })
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
-# Added inline documentation comments for clarity.
-# These comments explain routing and algorithm flow.
-
-# --- Routing Notes ---
-# The '/' route renders the main UI (templates/index.html).
-# The '/schedule' POST request receives process data, runs the selected algorithm,
-# computes metrics, and returns JSON back to the frontend.
-
-# --- Algorithm Notes ---
-# Supported algorithms:
-# - FCFS
-# - SJF / SRTF
-# - Round Robin
-# - Priority Scheduling (non-preemptive)
-# The compute_metrics() function calculates WT, TAT, CPU Utilization, etc.
-
-# Dev Note: Backend routing structured for easy extension
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
