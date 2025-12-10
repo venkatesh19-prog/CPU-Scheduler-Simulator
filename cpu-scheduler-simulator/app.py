@@ -1,20 +1,17 @@
-# app.py
 from flask import Flask, request, jsonify, render_template
 import os
 from collections import deque
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-
 def _deepcopy_procs(procs):
     return [{ **p, "arrival": int(p.get("arrival", 0)), "burst": int(p.get("burst", 1)), "remaining": int(p.get("remaining", p.get("burst", 1))) } for p in procs]
-
 
 def finalize(procs, events):
     completion = {}
     for ev in reversed(events):
         pid = ev["pid"]
-        if pid is None: 
+        if pid is None:
             continue
         if pid not in completion:
             completion[pid] = ev["time"] + 1
@@ -47,7 +44,6 @@ def finalize(procs, events):
         "events": events
     }
 
-
 def simulate_fcfs(procs):
     procs = _deepcopy_procs(procs)
     procs.sort(key=lambda p: (p["arrival"], p["pid"]))
@@ -62,7 +58,6 @@ def simulate_fcfs(procs):
             events.append({"time": t, "pid": p["pid"]})
             t += 1
     return finalize(procs, events)
-
 
 def simulate_srtf(procs):
     procs = _deepcopy_procs(procs)
@@ -86,7 +81,6 @@ def simulate_srtf(procs):
         cur["remaining"] -= 1
         t += 1
     return finalize(procs, events)
-
 
 def simulate_rr(procs, quantum=2):
     procs = _deepcopy_procs(procs)
@@ -121,7 +115,6 @@ def simulate_rr(procs, quantum=2):
             q.append(cur)
     return finalize(procs, events)
 
-
 def simulate_adaptive(procs, quantum=2):
     if not procs:
         return simulate_fcfs(procs)
@@ -135,11 +128,9 @@ def simulate_adaptive(procs, quantum=2):
         return simulate_rr(procs, quantum)
     return simulate_fcfs(procs)
 
-
 @app.route("/")
 def index():
     return render_template("index.html")
-
 
 @app.route("/simulate", methods=["POST"])
 def simulate():
@@ -179,7 +170,6 @@ def simulate():
             "processMetrics": res["metrics"]
         }
     })
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

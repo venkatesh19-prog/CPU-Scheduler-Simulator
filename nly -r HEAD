@@ -1,0 +1,7 @@
+[33m35e3cf7[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Final: responsive centered UI, animated canvas Gantt, export PNG/JSON, backend simulate
+Procfile
+cpu-scheduler-simulator/requirements.txt
+cpu-scheduler-simulator/static/css/style.css
+cpu-scheduler-simulator/static/js/app.js
+cpu-scheduler-simulator/templates/index.html
+requirements.txt
