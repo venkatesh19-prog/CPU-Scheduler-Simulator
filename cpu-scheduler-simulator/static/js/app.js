@@ -205,7 +205,21 @@
         <div>Context switches: ${metrics.contextSwitches}</div>
       `;
     }
-    renderGantt();
+    // Use animated Gantt if available (drawGanttAnimated expects schedule array [start,end,pid])
+    if (typeof drawGanttAnimated === 'function' && metrics) {
+      // convert events -> schedule (merged blocks)
+      const blocks = [];
+      for (let i=0;i<events.length;i++){
+        const e = events[i];
+        if (blocks.length===0 || blocks[blocks.length-1].pid !== e.pid) blocks.push({pid:e.pid, start:e.time, end:e.time+1});
+        else blocks[blocks.length-1].end = e.time+1;
+      }
+      const schedule = blocks.map(b => [b.start, b.end, b.pid]);
+      // call animated renderer
+      drawGanttAnimated(schedule);
+    } else {
+      renderGantt();
+    }
     renderProcTable();
   }
 
@@ -326,20 +340,24 @@
       recompute();
     });
 
-    $("#playBtn").addEventListener("click", ()=>{
-      if (!metrics) return;
-      if (interval) { clearInterval(interval); interval = null; $("#playBtn").innerText = "Play"; return; }
-      interval = setInterval(()=> {
-        tick++;
-        if (tick >= metrics.totalTime) { clearInterval(interval); interval = null; $("#playBtn").innerText = "Play"; tick = metrics.totalTime; }
-        updateUI();
-      }, speed);
-      $("#playBtn").innerText = "Pause";
-    });
+    // NOTE: this listens to sidebar play button -> rename your sidebar button to id="playSidebar"
+    const sidebarPlay = $("#playSidebar");
+    if (sidebarPlay) {
+      sidebarPlay.addEventListener("click", ()=>{
+        if (!metrics) return;
+        if (interval) { clearInterval(interval); interval = null; sidebarPlay.innerText = "Play"; return; }
+        interval = setInterval(()=> {
+          tick++;
+          if (tick >= metrics.totalTime) { clearInterval(interval); interval = null; sidebarPlay.innerText = "Play"; tick = metrics.totalTime; }
+          updateUI();
+        }, speed);
+        sidebarPlay.innerText = "Pause";
+      });
+    }
 
     $("#stepBack").addEventListener("click", ()=> { if (!metrics) return; tick = Math.max(0, tick-1); updateUI(); });
     $("#stepForward").addEventListener("click", ()=> { if (!metrics) return; tick = Math.min(metrics.totalTime, tick+1); updateUI(); });
-    $("#resetBtn").addEventListener("click", ()=> { if (!metrics) return; tick = 0; clearInterval(interval); interval = null; $("#playBtn").innerText = "Play"; updateUI(); });
+    $("#resetBtn").addEventListener("click", ()=> { if (!metrics) return; tick = 0; clearInterval(interval); interval = null; const sp = $("#playSidebar"); if (sp) sp.innerText = "Play"; updateUI(); });
   }
 
   /* ---------- Init ---------- */
@@ -356,7 +374,20 @@
     refreshSidebarTable();
     const inp = $("#inArrival");
     if (inp) inp.focus();
-    window.addEventListener("resize", () => renderGantt());
+    window.addEventListener("resize", () => {
+      // redraw whichever Gantt is active
+      if (typeof drawGanttAnimated === 'function' && metrics) {
+        // rebuild schedule and redraw
+        const blocks = [];
+        for (let i=0;i<events.length;i++){
+          const e = events[i];
+          if (blocks.length===0 || blocks[blocks.length-1].pid !== e.pid) blocks.push({pid:e.pid, start:e.time, end:e.time+1});
+          else blocks[blocks.length-1].end = e.time+1;
+        }
+        const schedule = blocks.map(b => [b.start, b.end, b.pid]);
+        drawGanttAnimated(schedule);
+      } else renderGantt();
+    });
   }
 
   // expose small debug API
@@ -367,12 +398,238 @@
 
   init();
 
+  /*
+    Visualization Notes:
+    This block explains how the Gantt Chart SVG is rendered.
+    - Each event is converted into a block (start ? end)
+    - Active process highlighted using a tick marker
+  */
+
+  /* ---------- Animated Canvas Gantt (drawGanttAnimated) ---------- */
+  (function(){
+    // animated gantt expects DOM elements inside the gantt container:
+    // #gantt (canvas), #playBtn, #pauseBtn, #speedSel
+    const canvas = document.getElementById("gantt");
+    const playBtn = document.getElementById("playBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const speedSel = document.getElementById("speedSel");
+    if (!canvas || !playBtn || !pauseBtn || !speedSel) {
+      // not present — skip registering animated renderer
+      return;
+    }
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const padding = { left: 60, right: 20, top: 18, bottom: 30 };
+    const trackHeight = 22;
+    const trackGap = 8;
+    const barRadius = 6;
+
+    let animState = {
+      schedule: null,
+      startTime: 0,
+      endTime: 0,
+      currentTime: 0,
+      playing: false,
+      speed: 1,
+      lastFrameTs: null,
+      pidRows: [],
+      canvasWidth: 0,
+      canvasHeight: 0
+    };
+
+    function colorForPid(pid) {
+      let hash = 0;
+      for (let i = 0; i < (pid ? pid.length : 1); i++) hash = (pid ? pid.charCodeAt(i) : i) + ((hash << 5) - hash);
+      const h = Math.abs(hash) % 360;
+      return `hsl(${h}deg 70% 60%)`;
+    }
+
+    function prepareSchedule(schedule) {
+      const pids = [];
+      schedule.forEach(s => {
+        if (s[2] !== null && !pids.includes(s[2])) pids.push(s[2]);
+      });
+      const pidRows = pids.map((pid, idx) => ({ pid, row: idx, color: colorForPid(pid) }));
+      const start = Math.min(...schedule.map(s => s[0]));
+      const end = Math.max(...schedule.map(s => s[1]));
+      return { pidRows, start, end };
+    }
+
+    function timeToX(t, start, end, w) {
+      const usable = w - padding.left - padding.right;
+      if (end === start) return padding.left;
+      return padding.left + ((t - start) / (end - start)) * usable;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      const r = Math.min(radius, height/2, width/2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + width, y, x + width, y + height, r);
+      ctx.arcTo(x + width, y + height, x, y + height, r);
+      ctx.arcTo(x, y + height, x, y, r);
+      ctx.arcTo(x, y, x + width, y, r);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function renderStatic(schedule, meta) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      animState.canvasWidth = rect.width;
+      animState.canvasHeight = rect.height;
+
+      const { pidRows, start, end } = meta;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, rect.width, rect.height);
+
+      ctx.fillStyle = "#0f172a";
+      ctx.font = "600 14px Arial";
+      ctx.fillText("Time →", 6, padding.top + 6);
+
+      pidRows.forEach(rowInfo => {
+        const y = padding.top + 24 + rowInfo.row * (trackHeight + trackGap);
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "600 12px Arial";
+        ctx.fillText(rowInfo.pid, 8, y + trackHeight / 2 + 1);
+
+        ctx.fillStyle = "#fbfdff";
+        const x0 = padding.left;
+        const w = rect.width - padding.left - padding.right;
+        ctx.fillRect(x0, y, w, trackHeight);
+      });
+
+      schedule.forEach(seg => {
+        const [s, e, pid] = seg;
+        if (pid === null) return;
+        const rowInfo = pidRows.find(p => p.pid === pid);
+        if (!rowInfo) return;
+        const row = rowInfo.row;
+        const y = padding.top + 24 + row * (trackHeight + trackGap);
+        const x1 = timeToX(s, start, end, rect.width);
+        const x2 = timeToX(e, start, end, rect.width);
+        const w = Math.max(1, x2 - x1);
+
+        ctx.fillStyle = rowInfo.color;
+        ctx.globalAlpha = 1;
+        roundRect(ctx, x1, y + 2, w, trackHeight - 4, barRadius);
+
+        if (w > 40) {
+          ctx.fillStyle = "#fff";
+          ctx.font = "600 11px Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(pid + ` (${s}-${e})`, x1 + w / 2, y + trackHeight / 2 + 1);
+        } else {
+          ctx.fillStyle = "#111827";
+          ctx.font = "11px Arial";
+          ctx.textAlign = "left";
+          ctx.fillText(pid, x2 + 6, y + trackHeight / 2 + 1);
+        }
+      });
+
+      ctx.fillStyle = "#374151";
+      ctx.font = "11px Arial";
+      ctx.textAlign = "center";
+      const ticks = Math.min(10, Math.ceil((meta.end - meta.start)));
+      for (let i = 0; i <= ticks; i++) {
+        const t = meta.start + (i / ticks) * (meta.end - meta.start);
+        const x = timeToX(t, meta.start, meta.end, rect.width);
+        ctx.fillRect(x - 0.5, padding.top + 12, 1, 6);
+        ctx.fillText(Math.round(t).toString(), x, padding.top + 6);
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    function renderFrame(anim) {
+      renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.startTime, end: anim.endTime });
+      const executedX = timeToX(anim.currentTime, anim.startTime, anim.endTime, animState.canvasWidth);
+      ctx.fillStyle = "rgba(0,0,0,0.03)";
+      ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, animState.canvasHeight - padding.top - padding.bottom - 24);
+
+      ctx.beginPath();
+      ctx.strokeStyle = "#ff253f";
+      ctx.lineWidth = 2;
+      ctx.moveTo(executedX + 0.5, padding.top + 12);
+      ctx.lineTo(executedX + 0.5, animState.canvasHeight - padding.bottom + 6);
+      ctx.stroke();
+
+      ctx.fillStyle = "#111827";
+      ctx.font = "600 12px Arial";
+      ctx.textAlign = "center";
+      const timeLabel = anim.currentTime.toFixed(2);
+      ctx.fillText(timeLabel, executedX, padding.top + 2);
+    }
+
+    function animationLoop(ts) {
+      if (!animState.playing) { animState.lastFrameTs = null; return; }
+      if (!animState.lastFrameTs) animState.lastFrameTs = ts;
+      const dtMs = ts - animState.lastFrameTs;
+      animState.lastFrameTs = ts;
+
+      const dtSecs = (dtMs / 1000) * animState.speed;
+      animState.currentTime += dtSecs;
+
+      if (animState.currentTime >= animState.endTime) {
+        animState.currentTime = animState.endTime;
+        renderFrame(animState);
+        animState.playing = false;
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+        return;
+      }
+
+      renderFrame(animState);
+      requestAnimationFrame(animationLoop);
+    }
+
+    window.drawGanttAnimated = function(schedule) {
+      if (!Array.isArray(schedule) || schedule.length === 0) {
+        const rect = canvas.getBoundingClientRect();
+        ctx.clearRect(0,0,rect.width,rect.height);
+        return;
+      }
+
+      const meta = prepareSchedule(schedule);
+      animState.schedule = schedule;
+      animState.pidRows = meta.pidRows;
+      animState.startTime = meta.start;
+      animState.endTime = meta.end;
+      animState.currentTime = meta.start;
+      animState.speed = parseFloat(speedSel.value) || 1;
+      animState.playing = false;
+      animState.lastFrameTs = null;
+
+      renderStatic(schedule, meta);
+      renderFrame(animState);
+
+      playBtn.disabled = false;
+      pauseBtn.disabled = true;
+
+      playBtn.onclick = function() {
+        if (animState.currentTime >= animState.endTime) animState.currentTime = animState.startTime;
+        animState.playing = true;
+        animState.speed = parseFloat(speedSel.value) || 1;
+        playBtn.disabled = true;
+        pauseBtn.disabled = false;
+        requestAnimationFrame(animationLoop);
+      };
+
+      pauseBtn.onclick = function() {
+        animState.playing = false;
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+      };
+
+      speedSel.onchange = function() {
+        animState.speed = parseFloat(speedSel.value) || 1;
+      };
+    };
+  })();
+
 })();
-
-
-/* 
-  Visualization Notes:
-  This block explains how the Gantt Chart SVG is rendered.
-  - Each event is converted into a block (start ? end)
-  - Active process highlighted using a tick marker
-*/

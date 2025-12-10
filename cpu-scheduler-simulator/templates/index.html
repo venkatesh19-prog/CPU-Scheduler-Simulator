@@ -82,7 +82,23 @@
           </div>
 
           <div id="ganttWrap" class="gantt-wrap">
-            <div id="ganttSvgContainer"></div>
+            <div id="ganttSvgContainer">
+  <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+    <button id="playBtn" class="btn primary">Play ▶</button>
+    <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
+    <label style="margin-left:8px">Speed:
+      <select id="speedSel">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2x</option>
+      </select>
+    </label>
+  </div>
+
+  <canvas id="gantt" height="140" style="width:100%;border-radius:8px;background:#fff"></canvas>
+</div>
+
           </div>
 
           <div class="grid-2">
