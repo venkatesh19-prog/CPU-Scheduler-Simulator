@@ -1,4 +1,4 @@
-// static/js/app.js
+// static/js/app.js v1.2
 if (window.__schedulerAppLoaded) {
   console.warn("schedulerApp already loaded - skipping second initialization");
 } else {
@@ -48,14 +48,16 @@ if (window.__schedulerAppLoaded) {
       return Math.min(10, Math.max(2, Math.round(s.avg)));
     }
 
+    // backend simulate; fallback to local if backend fails
     async function backendSimulate() {
       const body = { algorithm: mode, quantum: suggestQuantum(processes), processes };
       try {
         const r = await fetch('/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         if (!r.ok) throw new Error('simulate error');
         const j = await r.json();
-        events = j.events || j.events || [];
-        metrics = j.metrics || j.metrics || null;
+        events = j.events.map(e => ({ time: e.time, pid: e.pid }));
+        metrics = Object.assign({}, j.metrics);
+        metrics.totalTime = metrics.totalTime || (events.length || 0);
       } catch (err) {
         console.warn('backend simulate failed, using local fallback', err);
         localRecompute();
@@ -115,6 +117,8 @@ if (window.__schedulerAppLoaded) {
       const sidebarPlay = document.getElementById("playSidebar");
       const exportPNG = document.getElementById("exportPNG");
       const downloadJSON = document.getElementById("downloadJSON");
+      const loadSimple = document.getElementById("loadSimple");
+      const addRandom = document.getElementById("addRandom");
 
       if (!canvas) return;
       const ctx = canvas.getContext("2d", { alpha:false });
@@ -141,7 +145,7 @@ if (window.__schedulerAppLoaded) {
       function setCanvasHeightForRows(rowsCount) {
         const needed = Math.max(1, rowsCount);
         const estimated = padding.top + 28 + needed * (trackH + trackGap) + 40;
-        const minH = 160;
+        const minH = 140;
         const cssH = Math.max(minH, estimated);
         canvas.style.height = cssH + "px";
         resizeCanvas();
@@ -179,7 +183,8 @@ if (window.__schedulerAppLoaded) {
         pidRows.forEach(row=>{
           const y = padding.top + 28 + row.row * (trackH + trackGap);
           ctx.fillStyle="#0b1220"; ctx.font="600 12px Arial"; ctx.fillText(row.pid,8,y+trackH/2+2);
-          ctx.fillStyle="#f8fafc"; const x0 = padding.left; const w = anim.width - padding.left - padding.right; ctx.fillRect(x0, y, w, trackH);
+          ctx.fillStyle="#f8fafc";
+          const x0 = padding.left; const w = anim.width - padding.left - padding.right; ctx.fillRect(x0, y, w, trackH);
         });
 
         schedule.forEach(seg=>{
@@ -196,7 +201,7 @@ if (window.__schedulerAppLoaded) {
 
         // ticks
         ctx.fillStyle="#374151"; ctx.font="11px Arial"; ctx.textAlign="center";
-        const ticks = Math.min(12, Math.ceil((meta.end-meta.start)));
+        const ticks = Math.min(12, Math.ceil((meta.end-meta.start)||1));
         for (let i=0;i<=ticks;i++){
           const t = meta.start + (i/ticks)*(meta.end-meta.start);
           const x = timeToX(t, meta.start, meta.end, anim.width);
@@ -238,33 +243,28 @@ if (window.__schedulerAppLoaded) {
       function showPopup(pid, start, burst) {
         if (!popup || !anim) return;
         if (!pid) return;
-        const row = anim.pidRows.find(r=>r.pid===pid) || anim.pidRows[0];
+        // try to find exact row for this pid; if not found, clamp to last row
+        const row = anim.pidRows.find(r=>r.pid===pid) || (anim.pidRows.length ? anim.pidRows[anim.pidRows.length - 1] : null);
         if (!row) return;
         const canvasRect = canvas.getBoundingClientRect();
         const x1 = timeToX(start, anim.start, anim.end, canvasRect.width);
         const x2 = timeToX(start + burst, anim.start, anim.end, canvasRect.width);
         const centerX = Math.round((x1 + x2) / 2);
         const y = padding.top + 28 + row.row * (trackH + trackGap);
+        // compute popup top/left ensuring it stays inside canvas rect
+        const popupWidthGuess = 140;
         const suggestedTop = canvasRect.top + window.scrollY + Math.max(6, y - 36 - LIFT);
-        const suggestedLeft = canvasRect.left + centerX - 60;
-
-        popup.style.display = "block";
-        popup.style.left = "-9999px";
-        popup.style.top = "-9999px";
+        const suggestedLeft = canvasRect.left + centerX - (popupWidthGuess / 2);
+        // clamp
         const popupRect = popup.getBoundingClientRect();
-        popup.style.display = "";
-
         const minTop = canvasRect.top + window.scrollY + 6;
-        const maxTop = canvasRect.top + window.scrollY + canvasRect.height - popupRect.height - 6;
+        const maxTop = canvasRect.top + window.scrollY + canvasRect.height - (popupRect.height || 64) - 6;
         const top = Math.min(Math.max(suggestedTop, minTop), Math.max(minTop, maxTop));
-
         const minLeft = canvasRect.left + 6;
-        const maxLeft = canvasRect.left + canvasRect.width - popupRect.width - 6;
+        const maxLeft = canvasRect.left + canvasRect.width - (popupRect.width || popupWidthGuess) - 6;
         const left = Math.min(Math.max(suggestedLeft, minLeft), Math.max(minLeft, maxLeft));
-
         popup.style.left = `${Math.round(left)}px`;
         popup.style.top = `${Math.round(top)}px`;
-
         $("#popupPid").innerText = pid;
         $("#popupMeta").innerText = `Burst: ${burst}  •  Start: ${start}`;
         popup.classList.remove('pop'); void popup.offsetWidth; popup.classList.add('pop'); popup.setAttribute('aria-hidden','false');
@@ -287,7 +287,7 @@ if (window.__schedulerAppLoaded) {
           }
         }
         if (anim.current >= anim.end) {
-          anim.current = anim.end; renderFrame(); anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; if (sidebarPlay) sidebarPlay.innerText="Play"; return;
+          anim.current = anim.end; renderFrame(); anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; return;
         }
         renderFrame();
         requestAnimationFrame(loop);
@@ -310,6 +310,17 @@ if (window.__schedulerAppLoaded) {
         const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'schedule.json'; a.click(); URL.revokeObjectURL(url);
       });
 
+      // local helper buttons (moved)
+      loadSimple && loadSimple.addEventListener('click', ()=> {
+        processes = [
+          { id:1, pid:"P1", arrival:0, burst:4, remaining:4, color: randColor(1)},
+          { id:2, pid:"P2", arrival:1, burst:3, remaining:3, color: randColor(2)},
+          { id:3, pid:"P3", arrival:2, burst:1, remaining:1, color: randColor(3)}
+        ];
+        nextId = 4; recompute();
+      });
+      addRandom && addRandom.addEventListener('click', ()=> { for (let i=0;i<5;i++) addProcess(Math.floor(Math.random()*8), Math.floor(Math.random()*6)+1); });
+
       window.drawGanttAnimated = function(schedule) {
         if (!Array.isArray(schedule) || schedule.length===0) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
         const meta = prepare(schedule);
@@ -322,26 +333,18 @@ if (window.__schedulerAppLoaded) {
         setCanvasHeightForRows(meta.pidRows.length || 1);
         renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
         renderFrame();
-        playBtn.disabled = false; pauseBtn.disabled = true; if (sidebarPlay) sidebarPlay.innerText="Play";
+        playBtn.disabled = false; pauseBtn.disabled = true;
 
         playBtn.onclick = function() {
           if (!anim.schedule) return;
           if (anim.current >= anim.end) anim.current = anim.start; // replay support
           anim.playing = true; anim.speed = parseFloat(speedSel.value) || 1;
-          playBtn.disabled = true; pauseBtn.disabled = false; if (sidebarPlay) sidebarPlay.innerText="Pause";
+          playBtn.disabled = true; pauseBtn.disabled = false;
           requestAnimationFrame(loop);
         };
-        pauseBtn.onclick = function() { anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; if (sidebarPlay) sidebarPlay.innerText="Play"; };
+        pauseBtn.onclick = function() { anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; };
         speedSel.onchange = function() { anim.speed = parseFloat(speedSel.value) || 1; };
-
-        if (sidebarPlay) {
-          sidebarPlay.onclick = function() {
-            if (!anim.schedule) return;
-            if (anim.playing) { anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; sidebarPlay.innerText="Play"; }
-            else { if (anim.current >= anim.end) anim.current = anim.start; anim.playing=true; anim.speed=parseFloat(speedSel.value)||1; playBtn.disabled=true; pauseBtn.disabled=false; sidebarPlay.innerText="Pause"; requestAnimationFrame(loop); }
-          };
-        }
-
+        // ensure initial sizing done
         setTimeout(()=> { resizeCanvas(); renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); }, 30);
       };
 
@@ -377,13 +380,19 @@ if (window.__schedulerAppLoaded) {
       $("#predict").addEventListener("change", e=>{ enablePrediction = e.target.checked; recompute(); });
       $("#addProc").addEventListener("click", ()=>{ const a = Number($("#inArrival").value||0), b = Number($("#inBurst").value||1); addProcess(a,b); $("#inArrival").value=""; $("#inBurst").value=""; $("#inArrival").focus(); });
       $("#addSample").addEventListener("click", ()=>{ [{arrival:0,burst:5},{arrival:2,burst:3},{arrival:4,burst:1}].forEach(s=>addProcess(s.arrival,s.burst)); });
-      $("#loadSimple").addEventListener("click", ()=>{ processes = [{ id:1, pid:"P1", arrival:0, burst:4, remaining:4, color:randColor(1) },{ id:2, pid:"P2", arrival:1, burst:3, remaining:3, color:randColor(2) },{ id:3, pid:"P3", arrival:2, burst:1, remaining:1, color:randColor(3) }]; nextId=4; recompute(); });
-      $("#addRandom").addEventListener("click", ()=>{ for (let i=0;i<6;i++) addProcess(Math.floor(Math.random()*8), Math.floor(Math.random()*6)+1); });
+      $("#loadSimple").addEventListener("click", ()=>{ /* handled in canvas module - safe */ });
+      $("#addRandom").addEventListener("click", ()=>{ /* handled in canvas module - safe */ });
       $("#stepBack").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.max(0, tick-1); updateUI(); });
       $("#stepForward").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.min(metrics.totalTime, tick+1); updateUI(); });
-      $("#resetBtn").addEventListener("click", ()=>{ if (!metrics) return; tick = 0; updateUI(); const sp=$("#playSidebar"); if (sp) sp.innerText="Play"; });
+      $("#resetBtn").addEventListener("click", ()=>{ if (!metrics) return; tick = 0; updateUI(); });
 
-      $("#playSidebar").addEventListener("click", ()=>{ const sp=$("#playSidebar"); if (!metrics) return; if (sp._int) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; } else { sp._int = setInterval(()=>{ tick++; if (tick>=metrics.totalTime) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; tick=metrics.totalTime; } updateUI(); }, 250); sp.innerText="Pause"; } });
+      // small sidebar play that's independent (keeps logic simple)
+      $("#playSidebar") && $("#playSidebar").addEventListener("click", ()=> {
+        const sp = $("#playSidebar");
+        if (!metrics) return;
+        if (sp._int) { clearInterval(sp._int); sp._int = null; sp.innerText = "Play"; }
+        else { sp._int = setInterval(()=>{ tick++; if (tick>=metrics.totalTime) { clearInterval(sp._int); sp._int = null; sp.innerText = "Play"; tick=metrics.totalTime; } updateUI(); }, 250); sp.innerText="Pause"; }
+      });
     }
 
     function init() {

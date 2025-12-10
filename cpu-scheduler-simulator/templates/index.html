@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Intelligent CPU Scheduler</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1.1">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.2">
 </head>
 <body>
   <div class="page" role="main">
@@ -14,7 +14,7 @@
     </header>
 
     <main class="main">
-      <aside class="sidebar">
+      <aside class="sidebar" aria-label="Controls">
         <div class="panel">
           <label for="mode" class="label">Algorithm</label>
           <select id="mode" aria-label="Choose algorithm">
@@ -40,19 +40,7 @@
             <div class="small">Suggested RR quantum: <b id="recQuantum">-</b></div>
           </div>
 
-          <div class="controls-row">
-            <button id="playSidebar" class="btn primary">Play</button>
-            <button id="stepBack" class="btn">Step -</button>
-            <button id="stepForward" class="btn">Step +</button>
-            <button id="resetBtn" class="btn">Reset</button>
-          </div>
-
-          <div style="margin-top:10px">
-            <button id="loadSimple" class="btn block">Load Simple</button>
-            <button id="addRandom" class="btn block">Add Random</button>
-          </div>
-
-          <div class="json-table-wrap" style="margin-top:12px">
+          <div style="margin-top:12px">
             <table class="json-table" aria-label="Process table">
               <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th></tr></thead>
               <tbody id="jsonTableBody"><tr><td colspan="3" class="muted center small">No data</td></tr></tbody>
@@ -65,7 +53,7 @@
         </div>
       </aside>
 
-      <section class="content">
+      <section class="content" aria-label="Main content">
         <div class="card">
           <div class="card-header">
             <h2>Gantt & Timeline</h2>
@@ -76,18 +64,29 @@
             <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
               <button id="playBtn" class="btn primary">Play ▶</button>
               <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
+              <button id="stepBack" class="btn">Step -</button>
+              <button id="stepForward" class="btn">Step +</button>
+              <button id="resetBtn" class="btn">Reset</button>
+
               <label style="margin-left:8px">Speed:
                 <select id="speedSel"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
               </label>
 
               <button id="exportPNG" class="btn" title="Download PNG">Export PNG</button>
               <button id="downloadJSON" class="btn" title="Download schedule JSON">Download JSON</button>
+
+              <!-- moved here per your request -->
+              <button id="loadSimple" class="btn">Load Simple</button>
+              <button id="addRandom" class="btn">Add Random</button>
             </div>
 
             <canvas id="gantt" height="220" aria-hidden="false"></canvas>
 
             <div id="processPopup" class="process-popup" aria-hidden="true">
-              <div class="popup-inner"><div class="popup-title" id="popupPid">P1</div><div class="popup-meta" id="popupMeta">Burst: 5 • Start: 0</div></div>
+              <div class="popup-inner">
+                <div class="popup-title" id="popupPid">P1</div>
+                <div class="popup-meta" id="popupMeta">Burst: 5 • Start: 0</div>
+              </div>
             </div>
           </div>
 
@@ -119,6 +118,6 @@
     </main>
   </div>
 
-  <script src="/static/js/app.js?v=1.1"></script>
+  <script src="/static/js/app.js?v=1.2"></script>
 </body>
 </html>
