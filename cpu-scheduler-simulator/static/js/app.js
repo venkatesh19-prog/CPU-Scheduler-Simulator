@@ -7,6 +7,7 @@
     return colors[n % colors.length];
   };
 
+  // initial state
   let processes = [
     { id:1, pid:"P1", arrival:0, burst:4, remaining:4, color: randColor(1) },
     { id:2, pid:"P2", arrival:1, burst:3, remaining:3, color: randColor(2) },
@@ -17,9 +18,8 @@
   let goal = "";
   let enablePrediction = true;
   let events = [], metrics = null, tick = 0;
-  const ganttWrap = $("#ganttWrap");
 
-  /* ---------- recommendation & engines (same logic as backend) ---------- */
+  /* ---------- recommendation & helpers ---------- */
   function analyze(ps) {
     if (!ps || ps.length===0) return null;
     const bursts = ps.map(p=>p.burst);
@@ -46,21 +46,17 @@
     return Math.min(10, Math.max(2, Math.round(s.avg)));
   }
 
-  /* ---------- request to backend simulate ---------- */
+  /* ---------- backend simulate (preferred) ---------- */
   async function backendSimulate() {
     const body = { algorithm: mode, quantum: suggestQuantum(processes), processes };
     try {
-      const r = await fetch('/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify(body)
-      });
+      const r = await fetch('/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error('simulate error');
       const j = await r.json();
       events = j.events;
       metrics = j.metrics;
     } catch (err) {
-      // fallback to local simulation if backend fails (simple)
+      console.warn('backend simulate failed, falling back local', err);
       localRecompute();
     }
     tick = 0;
@@ -68,17 +64,16 @@
     updateUI();
   }
 
-  /* ---------- fallback local simulation (simple FCFS) ---------- */
+  /* ---------- fallback local recompute (FCFS) ---------- */
   function localRecompute() {
-    // simple FCFS fallback if server unavailable
     const sorted = processes.slice().sort((a,b)=>a.arrival - b.arrival || a.id - b.id);
     const ev = []; let t=0;
     for (const p of sorted) {
-      if (t < p.arrival) { for (let x=t;x<p.arrival;x++) ev.push({time:x, pid:null}); t=p.arrival; }
-      for (let k=0;k<p.burst;k++) { ev.push({time:t, pid:p.pid}); t++; }
+      if (t < p.arrival) { for (let x=t;x<p.arrival;x++) ev.push({time:x,pid:null}); t = p.arrival; }
+      for (let i=0;i<p.burst;i++){ ev.push({time:t,pid:p.pid}); t++; }
     }
-    metrics = { totalTime: ev.length, events: ev, avgWaiting:0, avgTurnaround:0, cpuUtil:100, throughput:0, contextSwitches:0, processMetrics:[] };
     events = ev;
+    metrics = { totalTime: ev.length, events: ev, avgWaiting:0, avgTurnaround:0, cpuUtil:100, throughput:0, contextSwitches:0, processMetrics:[] };
   }
 
   /* ---------- UI helpers ---------- */
@@ -96,6 +91,7 @@
       recompute();
     }));
   }
+
   function refreshSidebarTable() {
     const t = $("#jsonTableBody");
     if (!t) return;
@@ -110,7 +106,7 @@
     $("#recQuantum").innerText = suggestQuantum(processes);
   }
 
-  /* ---------- draw/animate gantt on canvas ---------- */
+  /* ---------- Animated canvas Gantt (same engine as before) ---------- */
   (function(){
     const canvas = document.getElementById("gantt");
     const playBtn = document.getElementById("playBtn");
@@ -120,6 +116,9 @@
     const popupPid = document.getElementById("popupPid");
     const popupMeta = document.getElementById("popupMeta");
     const sidebarPlay = document.getElementById("playSidebar");
+    const exportPNG = document.getElementById("exportPNG");
+    const downloadJSON = document.getElementById("downloadJSON");
+
     if (!canvas) return;
     const ctx = canvas.getContext("2d", { alpha:false });
     const padding = { left:60, right:20, top:18, bottom:30 };
@@ -210,7 +209,7 @@
     function renderFrame() {
       if (!anim.schedule) return;
       renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
-      // highlight active
+      // highlight active: draw lifted bar overlay for current segment
       const active = anim.schedule.find(seg => (anim.current >= seg[0] && anim.current < seg[1]));
       if (active) {
         const [s,e,pid] = active;
@@ -274,6 +273,27 @@
       requestAnimationFrame(loop);
     }
 
+    // export PNG
+    exportPNG && exportPNG.addEventListener('click', ()=> {
+      if (!anim.schedule) return alert('Nothing to export');
+      // create temporary canvas with full resolution
+      const tmp = document.createElement('canvas');
+      tmp.width = canvas.width; tmp.height = canvas.height;
+      const tctx = tmp.getContext('2d');
+      // draw current canvas contents
+      tctx.drawImage(canvas, 0, 0);
+      const data = tmp.toDataURL('image/png');
+      const a = document.createElement('a'); a.href = data; a.download = 'gantt.png'; a.click();
+    });
+
+    // download JSON
+    downloadJSON && downloadJSON.addEventListener('click', ()=> {
+      if (!anim.schedule) return alert('No schedule to download');
+      const payload = { schedule: anim.schedule, start: anim.start, end: anim.end, generated: new Date().toISOString() };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'schedule.json'; a.click(); URL.revokeObjectURL(url);
+    });
+
     window.drawGanttAnimated = function(schedule) {
       if (!Array.isArray(schedule) || schedule.length===0) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
       const meta = prepare(schedule);
@@ -289,13 +309,13 @@
 
       playBtn.onclick = function() {
         if (!anim.schedule) return;
-        if (anim.current >= anim.end) anim.current = anim.start;
+        if (anim.current >= anim.end) anim.current = anim.start; // replay support
         anim.playing = true; anim.speed = parseFloat(speedSel.value) || 1;
         playBtn.disabled = true; pauseBtn.disabled = false; if (sidebarPlay) sidebarPlay.innerText="Pause";
         requestAnimationFrame(loop);
       };
       pauseBtn.onclick = function() { anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; if (sidebarPlay) sidebarPlay.innerText="Play"; };
-      speedSel.onchange = function(){ anim.speed = parseFloat(speedSel.value) || 1; };
+      speedSel.onchange = function() { anim.speed = parseFloat(speedSel.value) || 1; };
 
       if (sidebarPlay) {
         sidebarPlay.onclick = function() {
@@ -304,19 +324,27 @@
           else { if (anim.current >= anim.end) anim.current = anim.start; anim.playing=true; anim.speed=parseFloat(speedSel.value)||1; playBtn.disabled=true; pauseBtn.disabled=false; sidebarPlay.innerText="Pause"; requestAnimationFrame(loop); }
         };
       }
-      // ensure canvas resizes correctly
+
+      // handle resizing to keep canvas full width and popup placement correct
       resizeCanvas();
-      window.setTimeout(()=> { resizeCanvas(); renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); }, 50);
+      setTimeout(()=> { resizeCanvas(); renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); }, 30);
     };
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(800, rect.width) * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = "100%";
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      anim.width = rect.width; anim.height = rect.height;
+    }
 
     window.addEventListener('resize', ()=> { if (anim.schedule) { resizeCanvas(); renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); } });
   })();
 
   /* ---------- main wiring ---------- */
-  function recompute() {
-    // prefer backend simulate; if fails, fallback
-    backendSimulate();
-  }
+  function recompute() { backendSimulate(); }
 
   function updateUI() {
     $("#tickLabel").innerText = `Tick: ${tick}/${metrics ? metrics.totalTime : 0}`;
@@ -324,7 +352,7 @@
     if (!metrics) sb.innerHTML = "No data";
     else {
       sb.innerHTML = `<div>Avg Waiting: ${metrics.avgWaiting.toFixed(2)}</div><div>Avg Turnaround: ${metrics.avgTurnaround.toFixed(2)}</div><div>CPU Util: ${metrics.cpuUtil.toFixed(2)}%</div><div>Throughput: ${metrics.throughput.toFixed(2)}</div><div>Context switches: ${metrics.contextSwitches}</div>`;
-      // draw schedule on canvas
+      // draw schedule
       const blocks = [];
       for (let i=0;i<events.length;i++){
         const e = events[i];
@@ -337,7 +365,7 @@
     renderProcTable(); refreshSidebarTable();
   }
 
-  /* ---------- small UI actions ---------- */
+  /* ---------- small actions ---------- */
   function addProcess(a,b) { const id = nextId++; const p={id,pid:`P${id}`,arrival:Number(a),burst:Number(b),remaining:Number(b),color:randColor(id)}; processes.push(p); processes.sort((x,y)=>x.arrival - y.arrival || x.id - y.id); recompute(); }
   function removeById(id) { processes = processes.filter(p=>p.id !== id); recompute(); }
 
@@ -352,17 +380,15 @@
     $("#stepBack").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.max(0, tick-1); updateUI(); });
     $("#stepForward").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.min(metrics.totalTime, tick+1); updateUI(); });
     $("#resetBtn").addEventListener("click", ()=>{ if (!metrics) return; tick = 0; updateUI(); const sp=$("#playSidebar"); if (sp) sp.innerText="Play"; });
-    $("#playSidebar").addEventListener("click", ()=>{ const sp=$("#playSidebar"); if (!metrics) return; // toggle simple sidebar playback (legacy)
-      if (sp._int) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; } else { sp._int = setInterval(()=>{ tick++; if (tick>=metrics.totalTime) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; tick=metrics.totalTime; } updateUI(); }, 250); sp.innerText="Pause"; } });
+
+    $("#playSidebar").addEventListener("click", ()=>{ const sp=$("#playSidebar"); if (!metrics) return; if (sp._int) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; } else { sp._int = setInterval(()=>{ tick++; if (tick>=metrics.totalTime) { clearInterval(sp._int); sp._int=null; sp.innerText="Play"; tick=metrics.totalTime; } updateUI(); }, 250); sp.innerText="Pause"; } });
   }
 
-  /* ---------- init ---------- */
   function init() {
     document.addEventListener("click", (e)=> { if (e.target && e.target.matches && e.target.matches(".link")) { const id = Number(e.target.dataset?.id); if (id) removeById(id); }});
-    wire(); recompute();
-    renderProcTable(); refreshSidebarTable();
-    const inp = $("#inArrival"); if (inp) inp.focus();
+    wire(); recompute(); renderProcTable(); refreshSidebarTable(); const inp = $("#inArrival"); if (inp) inp.focus();
   }
+
   window.schedulerApp = { getState: ()=>({processes,metrics,events,tick}), recompute };
   init();
 })();

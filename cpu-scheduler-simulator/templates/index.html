@@ -3,30 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Intelligent CPU Scheduler — Fixed UI</title>
+  <title>Intelligent CPU Scheduler — Final</title>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
 </head>
 <body>
-  <div class="page">
+  <div class="page" role="main">
     <header class="header">
-      <h1>Intelligent CPU Scheduler — Fixed UI</h1>
-      <p class="sub">Interactive Gantt • responsive layout • play/replay/popup</p>
+      <h1>Intelligent CPU Scheduler</h1>
+      <p class="sub">Animated Gantt • Popup lift animation • export PNG / JSON • responsive & centered</p>
     </header>
 
     <main class="main">
       <aside class="sidebar">
         <div class="panel">
-          <label class="label" for="mode">Algorithm</label>
-          <select id="mode">
+          <label for="mode" class="label">Algorithm</label>
+          <select id="mode" aria-label="Choose algorithm">
             <option value="ADAPTIVE">ADAPTIVE</option>
             <option value="FCFS">FCFS</option>
             <option value="SRTF">SRTF</option>
             <option value="RR">RR</option>
           </select>
 
-          <label class="label" for="goal">Goal</label>
+          <label for="goal" class="label">Goal</label>
           <select id="goal">
             <option value="">(none)</option>
             <option value="minWaiting">Minimize waiting</option>
@@ -55,15 +54,15 @@
           </div>
 
           <div class="json-table-wrap" style="margin-top:12px">
-            <table class="json-table">
+            <table class="json-table" aria-label="Process table">
               <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th></tr></thead>
               <tbody id="jsonTableBody"><tr><td colspan="3" class="muted center small">No data</td></tr></tbody>
             </table>
           </div>
 
-          <p class="small muted" style="margin-top:8px">
-            Tip: use <strong>RR</strong> for time-sharing; use <strong>SRTF</strong> to minimize turnaround for short jobs.
-          </p>
+          <div class="small muted" style="margin-top:8px">
+            Tip: choose <strong>RR</strong> for fairness/time-sharing, <strong>SRTF</strong> to reduce average waiting for short jobs.
+          </div>
         </div>
       </aside>
 
@@ -74,16 +73,19 @@
             <div class="muted" id="tickLabel">Tick: 0 / 0</div>
           </div>
 
-          <div id="ganttWrap" class="gantt-wrap">
+          <div id="ganttWrap" class="gantt-wrap" role="region" aria-label="Gantt chart area">
             <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
               <button id="playBtn" class="btn primary">Play ▶</button>
               <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
               <label style="margin-left:8px">Speed:
                 <select id="speedSel"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
               </label>
+
+              <button id="exportPNG" class="btn" title="Download PNG">Export PNG</button>
+              <button id="downloadJSON" class="btn" title="Download schedule JSON">Download JSON</button>
             </div>
 
-            <canvas id="gantt" height="200"></canvas>
+            <canvas id="gantt" height="220" aria-hidden="false"></canvas>
 
             <div id="processPopup" class="process-popup" aria-hidden="true">
               <div class="popup-inner"><div class="popup-title" id="popupPid">P1</div><div class="popup-meta" id="popupMeta">Burst: 5 • Start: 0</div></div>
@@ -94,8 +96,6 @@
             <div class="card-section">
               <h3>Summary</h3>
               <div id="summaryBox">No data</div>
-              <h4 style="margin-top:12px">CPU Timeline</h4>
-              <canvas id="cpuChart" height="100"></canvas>
             </div>
 
             <div class="card-section">
@@ -120,6 +120,6 @@
     </main>
   </div>
 
-  <script src="/static/js/app.js?v=6"></script>
+  <script src="/static/js/app.js?v=9"></script>
 </body>
 </html>
