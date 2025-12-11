@@ -1,407 +1,476 @@
-// static/js/app.js v1.2
-if (window.__schedulerAppLoaded) {
-  console.warn("schedulerApp already loaded - skipping second initialization");
-} else {
-  window.__schedulerAppLoaded = true;
+/**
+ * Project: Intelligent CPU Scheduler Simulator
+ * Author: AI Assistant
+ * Description: Frontend logic handling state, API communication, Gantt rendering,
+ * playback animation, and user interactions.
+ */
 
-  (function () {
-    const $ = s => document.querySelector(s);
-    const $$ = s => Array.from(document.querySelectorAll(s));
-    const randColor = n => {
-      const colors = ["#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#8b5cf6","#ec4899"];
-      return colors[n % colors.length];
+(function() {
+    // --- Configuration & State ---
+    const API_URL = 'http://127.0.0.1:5000/simulate';
+    
+    // Default Process Template
+    const DEFAULT_PROCESS = { pid: 'P1', arrival: 0, burst: 1, priority: 1 };
+    
+    // Application State
+    const state = {
+        processes: [
+            { pid: 'P1', arrival: 0, burst: 5, priority: 2 },
+            { pid: 'P2', arrival: 2, burst: 3, priority: 1 },
+            { pid: 'P3', arrival: 4, burst: 4, priority: 3 }
+        ],
+        config: {
+            algorithm: 'FCFS',
+            quantum: 2,
+            contextSwitch: 0
+        },
+        simulation: null, // Holds result from backend
+        playback: {
+            isPlaying: false,
+            currentTime: 0,
+            speed: 1,
+            totalDuration: 0,
+            animationId: null,
+            lastFrameTime: 0
+        }
     };
 
-    // state
-    let processes = [
-      { id:1, pid:"P1", arrival:0, burst:4, remaining:4, color: randColor(1) },
-      { id:2, pid:"P2", arrival:1, burst:3, remaining:3, color: randColor(2) },
-      { id:3, pid:"P3", arrival:2, burst:1, remaining:1, color: randColor(3) }
+    // Color Palette for Processes (CSS Vars would be ideal, using Hex for SVG)
+    const COLORS = [
+        '#60a5fa', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#9ca3af'
     ];
-    let nextId = 4;
-    let mode = "ADAPTIVE";
-    let goal = "";
-    let enablePrediction = true;
-    let events = [], metrics = null, tick = 0;
 
-    function analyze(ps) {
-      if (!ps || ps.length===0) return null;
-      const bursts = ps.map(p=>p.burst);
-      const avg = bursts.reduce((a,b)=>a+b,0)/bursts.length;
-      const variance = bursts.reduce((a,b)=>a+(b-avg)*(b-avg),0)/bursts.length;
-      const std = Math.sqrt(variance);
-      return { n:ps.length, avg, variance, std };
-    }
-    function recommend(ps,g=null) {
-      const stats = analyze(ps);
-      if (!stats) return {algo:"FCFS", reason:"no processes"};
-      if (g==="minWaiting") return {algo:"SRTF", reason:"Min waiting"};
-      if (g==="fairness") return {algo:"RR", reason:"Fairness"};
-      if (g==="lowContext") return {algo:"FCFS", reason:"Low context switches"};
-      if (stats.std / Math.max(1,stats.avg) > 0.6) return {algo:"SRTF", reason:"High burst variance"};
-      if (stats.n > 6) return {algo:"RR", reason:"Many processes"};
-      return {algo:"FCFS", reason:"Default heuristic"};
-    }
-    function suggestQuantum(ps) {
-      const s = analyze(ps);
-      if (!s) return 4;
-      return Math.min(10, Math.max(2, Math.round(s.avg)));
-    }
+    // --- DOM Elements ---
+    const dom = {
+        processList: document.getElementById('process-list'),
+        btnAddProcess: document.getElementById('btn-add-process'),
+        algoSelect: document.getElementById('algo-select'),
+        quantumGroup: document.getElementById('group-quantum'),
+        quantumInput: document.getElementById('quantum'),
+        csInput: document.getElementById('context-switch'),
+        btnRun: document.getElementById('btn-run'),
+        btnReset: document.getElementById('btn-reset'),
+        ganttSvg: document.getElementById('gantt-svg'),
+        ganttWrapper: document.getElementById('gantt-wrapper'),
+        timeCursor: document.getElementById('time-cursor'),
+        currentTimeLabel: document.getElementById('current-time'),
+        btnPlay: document.getElementById('btn-play-pause'),
+        btnStepBack: document.getElementById('btn-step-back'),
+        btnStepFwd: document.getElementById('btn-step-fwd'),
+        speedSlider: document.getElementById('speed-slider'),
+        speedLabel: document.getElementById('speed-label'),
+        decisionLog: document.getElementById('decision-log'),
+        metricsBody: document.getElementById('metrics-body'),
+        avgWait: document.getElementById('avg-wait'),
+        avgTurn: document.getElementById('avg-turn'),
+        cpuUtil: document.getElementById('cpu-util'),
+        tooltip: document.getElementById('tooltip'),
+        btnExport: document.getElementById('btn-export'),
+        fileImport: document.getElementById('file-import'),
+        themeToggle: document.getElementById('theme-toggle')
+    };
 
-    // backend simulate; fallback to local if backend fails
-    async function backendSimulate() {
-      const body = { algorithm: mode, quantum: suggestQuantum(processes), processes };
-      try {
-        const r = await fetch('/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        if (!r.ok) throw new Error('simulate error');
-        const j = await r.json();
-        events = j.events.map(e => ({ time: e.time, pid: e.pid }));
-        metrics = Object.assign({}, j.metrics);
-        metrics.totalTime = metrics.totalTime || (events.length || 0);
-      } catch (err) {
-        console.warn('backend simulate failed, using local fallback', err);
-        localRecompute();
-      }
-      tick = 0;
-      updateRec();
-      updateUI();
-    }
-
-    function localRecompute() {
-      const sorted = processes.slice().sort((a,b)=>a.arrival - b.arrival || a.id - b.id);
-      const ev = []; let t=0;
-      for (const p of sorted) {
-        if (t < p.arrival) { for (let x=t;x<p.arrival;x++) ev.push({time:x,pid:null}); t = p.arrival; }
-        for (let i=0;i<p.burst;i++){ ev.push({time:t,pid:p.pid}); t++; }
-      }
-      events = ev;
-      metrics = { totalTime: ev.length, events: ev, avgWaiting:0, avgTurnaround:0, cpuUtil:100, throughput:0, contextSwitches:0, processMetrics:[] };
-    }
-
-    function renderProcTable() {
-      const tbody = $("#procTbody");
-      tbody.innerHTML = "";
-      if (processes.length===0) { tbody.innerHTML = `<tr><td colspan="4" class="muted center small">No processes</td></tr>`; return; }
-      processes.forEach(p=> {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${p.pid}</td><td class="center">${p.arrival}</td><td class="center">${p.burst}</td><td class="right"><button class="link" data-id="${p.id}">Remove</button></td>`;
-        tbody.appendChild(tr);
-      });
-      $$("#procTbody .link").forEach(btn => btn.addEventListener('click', e => {
-        processes = processes.filter(x => x.id !== Number(e.target.dataset.id));
-        recompute();
-      }));
-    }
-
-    function refreshSidebarTable() {
-      const t = $("#jsonTableBody");
-      if (!t) return;
-      if (processes.length===0) { t.innerHTML = `<tr><td colspan="3" class="muted center small">No data</td></tr>`; return; }
-      t.innerHTML = processes.map(p=>`<tr><td>${p.pid}</td><td>${p.arrival}</td><td>${p.burst}</td></tr>`).join('');
-    }
-
-    function updateRec() {
-      const rec = recommend(processes, goal || null);
-      $("#recAlgo").innerText = rec.algo;
-      $("#recReason").innerText = rec.reason;
-      $("#recQuantum").innerText = suggestQuantum(processes);
-    }
-
-    /* Animated canvas gantt (auto-resize height + popup clamp + replay) */
-    (function(){
-      const canvas = document.getElementById("gantt");
-      const playBtn = document.getElementById("playBtn");
-      const pauseBtn = document.getElementById("pauseBtn");
-      const speedSel = document.getElementById("speedSel");
-      const popup = document.getElementById("processPopup");
-      const sidebarPlay = document.getElementById("playSidebar");
-      const exportPNG = document.getElementById("exportPNG");
-      const downloadJSON = document.getElementById("downloadJSON");
-      const loadSimple = document.getElementById("loadSimple");
-      const addRandom = document.getElementById("addRandom");
-
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d", { alpha:false });
-      const padding = { left:60, right:20, top:18, bottom:30 };
-      const trackH = 22, trackGap = 10, radius=6, LIFT = 8;
-
-      let anim = { schedule:null, pidRows:[], start:0, end:1, current:0, playing:false, speed:1, lastTs:null, width:0, height:0 };
-
-      function colorForPid(pid) {
-        if (!pid) return "#e5e7eb";
-        let hash=0; for (let i=0;i<pid.length;i++) hash = pid.charCodeAt(i) + ((hash<<5)-hash);
-        const h = Math.abs(hash) % 360; return `hsl(${h}deg 72% 56%)`;
-      }
-
-      function prepare(schedule) {
-        const pids=[];
-        schedule.forEach(s=>{ if (s[2]!==null && !pids.includes(s[2])) pids.push(s[2]); });
-        const pidRows = pids.map((pid,idx)=>({pid,row:idx,color:colorForPid(pid)}));
-        const start = Math.min(...schedule.map(s=>s[0]));
-        const end = Math.max(...schedule.map(s=>s[1]));
-        return { pidRows, start, end };
-      }
-
-      function setCanvasHeightForRows(rowsCount) {
-        const needed = Math.max(1, rowsCount);
-        const estimated = padding.top + 28 + needed * (trackH + trackGap) + 40;
-        const minH = 140;
-        const cssH = Math.max(minH, estimated);
-        canvas.style.height = cssH + "px";
-        resizeCanvas();
-      }
-
-      function resizeCanvas() {
-        const rect = canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = Math.max(800, rect.width) * dpr;
-        canvas.height = rect.height * dpr;
-        canvas.style.width = "100%";
-        ctx.setTransform(dpr,0,0,dpr,0,0);
-        anim.width = rect.width; anim.height = rect.height;
-      }
-
-      function roundRect(c,x,y,w,h,r) {
-        const rad = Math.min(r,h/2,w/2);
-        c.beginPath();
-        c.moveTo(x+rad,y);
-        c.arcTo(x+w,y,x+w,y+h,rad);
-        c.arcTo(x+w,y+h,x,y+h,rad);
-        c.arcTo(x,y+h,x,y,rad);
-        c.arcTo(x,y,x+w,y,rad);
-        c.closePath();
-        c.fill();
-      }
-
-      function renderStatic(schedule,meta) {
-        resizeCanvas();
-        const { pidRows, start, end } = meta;
-        ctx.clearRect(0,0,anim.width,anim.height);
-        ctx.fillStyle="#fff"; ctx.fillRect(0,0,anim.width,anim.height);
-        ctx.fillStyle="#0b1220"; ctx.font="600 14px Arial"; ctx.fillText("Time →",8,padding.top+6);
-
-        pidRows.forEach(row=>{
-          const y = padding.top + 28 + row.row * (trackH + trackGap);
-          ctx.fillStyle="#0b1220"; ctx.font="600 12px Arial"; ctx.fillText(row.pid,8,y+trackH/2+2);
-          ctx.fillStyle="#f8fafc";
-          const x0 = padding.left; const w = anim.width - padding.left - padding.right; ctx.fillRect(x0, y, w, trackH);
-        });
-
-        schedule.forEach(seg=>{
-          const [s,e,pid] = seg;
-          const row = pid ? pidRows.find(p=>p.pid===pid) : null;
-          const y = pid ? padding.top + 28 + row.row * (trackH + trackGap) : padding.top + 28 + (pidRows.length*(trackH+trackGap));
-          const x1 = timeToX(s,start,end,anim.width);
-          const x2 = timeToX(e,start,end,anim.width); const w = Math.max(1, x2-x1);
-          ctx.fillStyle = pid ? row.color : "#e5e7eb"; ctx.globalAlpha = pid?1:0.9;
-          roundRect(ctx, x1, y+2, w, trackH-4, radius);
-          if (w>40) { ctx.fillStyle="#fff"; ctx.font="600 11px Arial"; ctx.textAlign="center"; ctx.fillText(pid?`${pid} (${s}-${e})`:"idle", x1+w/2, y+trackH/2+2); }
-          else { ctx.fillStyle="#0b1220"; ctx.font="11px Arial"; ctx.textAlign="left"; ctx.fillText(pid||"idle", x2+6, y+trackH/2+2); }
-        });
-
-        // ticks
-        ctx.fillStyle="#374151"; ctx.font="11px Arial"; ctx.textAlign="center";
-        const ticks = Math.min(12, Math.ceil((meta.end-meta.start)||1));
-        for (let i=0;i<=ticks;i++){
-          const t = meta.start + (i/ticks)*(meta.end-meta.start);
-          const x = timeToX(t, meta.start, meta.end, anim.width);
-          ctx.fillRect(x-0.5, padding.top+12, 1, 6);
-          ctx.fillText(Math.round(t).toString(), x, padding.top+6);
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      function timeToX(t, start, end, w) {
-        const usable = w - padding.left - padding.right;
-        if (end === start) return padding.left;
-        return padding.left + ((t-start)/(end-start)) * usable;
-      }
-
-      function renderFrame() {
-        if (!anim.schedule) return;
-        renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
-        const active = anim.schedule.find(seg => (anim.current >= seg[0] && anim.current < seg[1]));
-        if (active) {
-          const [s,e,pid] = active;
-          const rowInfo = pid ? anim.pidRows.find(r => r.pid === pid) : null;
-          const y = pid ? padding.top + 28 + rowInfo.row * (trackH + trackGap) : padding.top + 28 + (anim.pidRows.length*(trackH+trackGap));
-          const x1 = timeToX(s, anim.start, anim.end, anim.width);
-          const x2 = timeToX(e, anim.start, anim.end, anim.width); const w = Math.max(1, x2-x1);
-          const liftedY = y - LIFT;
-          ctx.save();
-          ctx.fillStyle = pid ? rowInfo.color : "#e5e7eb";
-          roundRect(ctx, x1, liftedY+2, w, trackH-4, radius);
-          ctx.restore();
-        }
-        const executedX = timeToX(anim.current, anim.start, anim.end, anim.width);
-        ctx.fillStyle = "rgba(2,6,23,0.04)";
-        ctx.fillRect(padding.left, padding.top + 24, executedX - padding.left, anim.height - padding.top - padding.bottom - 24);
-        ctx.beginPath(); ctx.strokeStyle="#ff3b58"; ctx.lineWidth=2; ctx.moveTo(executedX+0.5, padding.top+8); ctx.lineTo(executedX+0.5, anim.height - padding.bottom + 6); ctx.stroke();
-        ctx.fillStyle="#0b1220"; ctx.font="600 12px Arial"; ctx.textAlign="center"; ctx.fillText(anim.current.toFixed(2), executedX, padding.top+2);
-      }
-
-      function showPopup(pid, start, burst) {
-        if (!popup || !anim) return;
-        if (!pid) return;
-        // try to find exact row for this pid; if not found, clamp to last row
-        const row = anim.pidRows.find(r=>r.pid===pid) || (anim.pidRows.length ? anim.pidRows[anim.pidRows.length - 1] : null);
-        if (!row) return;
-        const canvasRect = canvas.getBoundingClientRect();
-        const x1 = timeToX(start, anim.start, anim.end, canvasRect.width);
-        const x2 = timeToX(start + burst, anim.start, anim.end, canvasRect.width);
-        const centerX = Math.round((x1 + x2) / 2);
-        const y = padding.top + 28 + row.row * (trackH + trackGap);
-        // compute popup top/left ensuring it stays inside canvas rect
-        const popupWidthGuess = 140;
-        const suggestedTop = canvasRect.top + window.scrollY + Math.max(6, y - 36 - LIFT);
-        const suggestedLeft = canvasRect.left + centerX - (popupWidthGuess / 2);
-        // clamp
-        const popupRect = popup.getBoundingClientRect();
-        const minTop = canvasRect.top + window.scrollY + 6;
-        const maxTop = canvasRect.top + window.scrollY + canvasRect.height - (popupRect.height || 64) - 6;
-        const top = Math.min(Math.max(suggestedTop, minTop), Math.max(minTop, maxTop));
-        const minLeft = canvasRect.left + 6;
-        const maxLeft = canvasRect.left + canvasRect.width - (popupRect.width || popupWidthGuess) - 6;
-        const left = Math.min(Math.max(suggestedLeft, minLeft), Math.max(minLeft, maxLeft));
-        popup.style.left = `${Math.round(left)}px`;
-        popup.style.top = `${Math.round(top)}px`;
-        $("#popupPid").innerText = pid;
-        $("#popupMeta").innerText = `Burst: ${burst}  •  Start: ${start}`;
-        popup.classList.remove('pop'); void popup.offsetWidth; popup.classList.add('pop'); popup.setAttribute('aria-hidden','false');
-        clearTimeout(popup._hideTimer);
-        popup._hideTimer = setTimeout(()=> { popup.classList.remove('pop'); popup.setAttribute('aria-hidden','true'); }, 1200);
-      }
-
-      function loop(ts) {
-        if (!anim.playing) { anim.lastTs = null; return; }
-        if (!anim.lastTs) anim.lastTs = ts;
-        const dtMs = ts - anim.lastTs; anim.lastTs = ts;
-        const dt = (dtMs / 1000) * anim.speed;
-        anim.current += dt;
-        if (anim.schedule) {
-          for (let i=0;i<anim.schedule.length;i++){
-            const seg = anim.schedule[i];
-            if (anim.current >= seg[0] && anim.current - dt < seg[0]) {
-              showPopup(seg[2], seg[0], seg[1]-seg[0]);
-            }
-          }
-        }
-        if (anim.current >= anim.end) {
-          anim.current = anim.end; renderFrame(); anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; return;
-        }
-        renderFrame();
-        requestAnimationFrame(loop);
-      }
-
-      exportPNG && exportPNG.addEventListener('click', ()=> {
-        if (!anim.schedule) return alert('Nothing to export');
-        const tmp = document.createElement('canvas');
-        tmp.width = canvas.width; tmp.height = canvas.height;
-        const tctx = tmp.getContext('2d');
-        tctx.drawImage(canvas, 0, 0);
-        const data = tmp.toDataURL('image/png');
-        const a = document.createElement('a'); a.href = data; a.download = 'gantt.png'; a.click();
-      });
-
-      downloadJSON && downloadJSON.addEventListener('click', ()=> {
-        if (!anim.schedule) return alert('No schedule to download');
-        const payload = { schedule: anim.schedule, start: anim.start, end: anim.end, generated: new Date().toISOString() };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'schedule.json'; a.click(); URL.revokeObjectURL(url);
-      });
-
-      // local helper buttons (moved)
-      loadSimple && loadSimple.addEventListener('click', ()=> {
-        processes = [
-          { id:1, pid:"P1", arrival:0, burst:4, remaining:4, color: randColor(1)},
-          { id:2, pid:"P2", arrival:1, burst:3, remaining:3, color: randColor(2)},
-          { id:3, pid:"P3", arrival:2, burst:1, remaining:1, color: randColor(3)}
-        ];
-        nextId = 4; recompute();
-      });
-      addRandom && addRandom.addEventListener('click', ()=> { for (let i=0;i<5;i++) addProcess(Math.floor(Math.random()*8), Math.floor(Math.random()*6)+1); });
-
-      window.drawGanttAnimated = function(schedule) {
-        if (!Array.isArray(schedule) || schedule.length===0) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
-        const meta = prepare(schedule);
-        anim.schedule = schedule;
-        anim.pidRows = meta.pidRows;
-        anim.start = meta.start; anim.end = meta.end;
-        anim.current = meta.start;
-        anim.speed = parseFloat(speedSel.value) || 1;
-        anim.playing = false; anim.lastTs = null;
-        setCanvasHeightForRows(meta.pidRows.length || 1);
-        renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end });
-        renderFrame();
-        playBtn.disabled = false; pauseBtn.disabled = true;
-
-        playBtn.onclick = function() {
-          if (!anim.schedule) return;
-          if (anim.current >= anim.end) anim.current = anim.start; // replay support
-          anim.playing = true; anim.speed = parseFloat(speedSel.value) || 1;
-          playBtn.disabled = true; pauseBtn.disabled = false;
-          requestAnimationFrame(loop);
-        };
-        pauseBtn.onclick = function() { anim.playing=false; playBtn.disabled=false; pauseBtn.disabled=true; };
-        speedSel.onchange = function() { anim.speed = parseFloat(speedSel.value) || 1; };
-        // ensure initial sizing done
-        setTimeout(()=> { resizeCanvas(); renderStatic(schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); }, 30);
-      };
-
-      window.addEventListener('resize', ()=> { if (anim.schedule) { resizeCanvas(); renderStatic(anim.schedule, { pidRows: anim.pidRows, start: anim.start, end: anim.end }); renderFrame(); } });
-    })();
-
-    function recompute() { backendSimulate(); }
-
-    function updateUI() {
-      $("#tickLabel").innerText = `Tick: ${tick}/${metrics ? metrics.totalTime : 0}`;
-      const sb = $("#summaryBox");
-      if (!metrics) sb.innerHTML = "No data";
-      else {
-        sb.innerHTML = `<div>Avg Waiting: ${metrics.avgWaiting.toFixed(2)}</div><div>Avg Turnaround: ${metrics.avgTurnaround.toFixed(2)}</div><div>CPU Util: ${metrics.cpuUtil.toFixed(2)}%</div><div>Throughput: ${metrics.throughput.toFixed(2)}</div><div>Context switches: ${metrics.contextSwitches}</div>`;
-        const blocks = [];
-        for (let i=0;i<events.length;i++){
-          const e = events[i];
-          if (!blocks.length || blocks[blocks.length-1].pid !== e.pid) blocks.push({ pid: e.pid, start: e.time, end: e.time+1 });
-          else blocks[blocks.length-1].end = e.time+1;
-        }
-        const schedule = blocks.map(b=>[b.start,b.end,b.pid]);
-        if (typeof drawGanttAnimated === 'function' && schedule.length) drawGanttAnimated(schedule);
-      }
-      renderProcTable(); refreshSidebarTable();
-    }
-
-    function addProcess(a,b) { const id = nextId++; const p={id,pid:`P${id}`,arrival:Number(a),burst:Number(b),remaining:Number(b),color:randColor(id)}; processes.push(p); processes.sort((x,y)=>x.arrival - y.arrival || x.id - y.id); recompute(); }
-    function removeById(id) { processes = processes.filter(p=>p.id !== id); recompute(); }
-
-    function wire() {
-      $("#mode").addEventListener("change", e=>{ mode = e.target.value; recompute(); });
-      $("#goal").addEventListener("change", e=>{ goal = e.target.value; recompute(); });
-      $("#predict").addEventListener("change", e=>{ enablePrediction = e.target.checked; recompute(); });
-      $("#addProc").addEventListener("click", ()=>{ const a = Number($("#inArrival").value||0), b = Number($("#inBurst").value||1); addProcess(a,b); $("#inArrival").value=""; $("#inBurst").value=""; $("#inArrival").focus(); });
-      $("#addSample").addEventListener("click", ()=>{ [{arrival:0,burst:5},{arrival:2,burst:3},{arrival:4,burst:1}].forEach(s=>addProcess(s.arrival,s.burst)); });
-      $("#loadSimple").addEventListener("click", ()=>{ /* handled in canvas module - safe */ });
-      $("#addRandom").addEventListener("click", ()=>{ /* handled in canvas module - safe */ });
-      $("#stepBack").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.max(0, tick-1); updateUI(); });
-      $("#stepForward").addEventListener("click", ()=>{ if (!metrics) return; tick = Math.min(metrics.totalTime, tick+1); updateUI(); });
-      $("#resetBtn").addEventListener("click", ()=>{ if (!metrics) return; tick = 0; updateUI(); });
-
-      // small sidebar play that's independent (keeps logic simple)
-      $("#playSidebar") && $("#playSidebar").addEventListener("click", ()=> {
-        const sp = $("#playSidebar");
-        if (!metrics) return;
-        if (sp._int) { clearInterval(sp._int); sp._int = null; sp.innerText = "Play"; }
-        else { sp._int = setInterval(()=>{ tick++; if (tick>=metrics.totalTime) { clearInterval(sp._int); sp._int = null; sp.innerText = "Play"; tick=metrics.totalTime; } updateUI(); }, 250); sp.innerText="Pause"; }
-      });
-    }
-
+    // --- Initialization ---
     function init() {
-      document.addEventListener("click", (e)=> { if (e.target && e.target.matches && e.target.matches(".link")) { const id = Number(e.target.dataset?.id); if (id) removeById(id); }});
-      wire(); recompute(); renderProcTable(); refreshSidebarTable(); const inp = $("#inArrival"); if (inp) inp.focus();
+        renderProcessList();
+        setupEventListeners();
+        toggleQuantumInput();
     }
 
-    window.schedulerApp = { getState: ()=>({processes,metrics,events,tick}), recompute };
+    // --- Event Listeners ---
+    function setupEventListeners() {
+        dom.btnAddProcess.addEventListener('click', addProcess);
+        dom.algoSelect.addEventListener('change', (e) => {
+            state.config.algorithm = e.target.value;
+            toggleQuantumInput();
+        });
+        dom.btnRun.addEventListener('click', runSimulation);
+        dom.btnReset.addEventListener('click', resetSimulation);
+        
+        // Playback
+        dom.btnPlay.addEventListener('click', togglePlay);
+        dom.btnStepBack.addEventListener('click', () => step(-1));
+        dom.btnStepFwd.addEventListener('click', () => step(1));
+        dom.speedSlider.addEventListener('input', (e) => {
+            const vals = [0.25, 0.5, 1, 2, 4];
+            state.playback.speed = vals[e.target.value - 1] || 1;
+            dom.speedLabel.textContent = state.playback.speed + 'x';
+        });
+
+        // Export/Import
+        dom.btnExport.addEventListener('click', exportData);
+        dom.fileImport.addEventListener('change', importData);
+
+        // Accessibility / Keyboard
+        document.addEventListener('keydown', handleKeyboard);
+        dom.themeToggle.addEventListener('click', () => document.body.classList.toggle('high-contrast'));
+
+        // Input Changes
+        dom.quantumInput.addEventListener('change', (e) => state.config.quantum = parseInt(e.target.value));
+        dom.csInput.addEventListener('change', (e) => state.config.contextSwitch = parseInt(e.target.value));
+    }
+
+    function toggleQuantumInput() {
+        dom.quantumGroup.style.display = state.config.algorithm === 'RR' ? 'block' : 'none';
+    }
+
+    // --- Process Management ---
+    function renderProcessList() {
+        dom.processList.innerHTML = '';
+        state.processes.forEach((proc, index) => {
+            const row = document.createElement('div');
+            row.className = 'process-item';
+            row.innerHTML = `
+                <span style="background:${COLORS[index % COLORS.length]}; width:12px; height:12px; display:inline-block; border-radius:50%;"></span>
+                <input type="text" value="${proc.pid}" data-idx="${index}" data-field="pid" aria-label="Process ID">
+                <input type="number" value="${proc.arrival}" min="0" data-idx="${index}" data-field="arrival" placeholder="Arr" aria-label="Arrival Time">
+                <input type="number" value="${proc.burst}" min="1" data-idx="${index}" data-field="burst" placeholder="Burst" aria-label="Burst Time">
+                <input type="number" value="${proc.priority}" min="1" data-idx="${index}" data-field="priority" placeholder="Pri" aria-label="Priority">
+                <button class="btn-danger btn-sm" onclick="removeProcess(${index})">×</button>
+            `;
+            // Attach individual listeners to inputs for real-time state update
+            row.querySelectorAll('input').forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const field = e.target.dataset.field;
+                    const idx = e.target.dataset.idx;
+                    let val = e.target.value;
+                    if(field !== 'pid') val = parseInt(val) || 0;
+                    state.processes[idx][field] = val;
+                });
+            });
+            dom.processList.appendChild(row);
+        });
+    }
+
+    function addProcess() {
+        const id = state.processes.length + 1;
+        state.processes.push({ ...DEFAULT_PROCESS, pid: 'P' + id });
+        renderProcessList();
+    }
+
+    // Exposed to global scope for inline onclick (simple pattern)
+    window.removeProcess = function(index) {
+        state.processes.splice(index, 1);
+        renderProcessList();
+    };
+
+    // --- Simulation Logic ---
+    async function runSimulation() {
+        // Validate
+        if (state.processes.length === 0) return alert("Add at least one process.");
+
+        const payload = {
+            algorithm: state.config.algorithm,
+            preemptive: false, // Backend requirement specified NP for SJF/Priority
+            quantum: state.config.quantum,
+            context_switch_ms: state.config.contextSwitch,
+            processes: state.processes
+        };
+
+        dom.btnRun.textContent = "Simulating...";
+        dom.btnRun.disabled = true;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if(!response.ok) throw new Error("Simulation failed");
+
+            const data = await response.json();
+            state.simulation = data;
+            
+            // Setup Visualization
+            setupVisualizer(data);
+            
+        } catch (error) {
+            console.error(error);
+            alert("Error connecting to scheduler service. Ensure scheduler.py is running.");
+        } finally {
+            dom.btnRun.textContent = "Simulate";
+            dom.btnRun.disabled = false;
+        }
+    }
+
+    function setupVisualizer(data) {
+        // Reset playback
+        state.playback.currentTime = 0;
+        state.playback.isPlaying = false;
+        
+        // Calculate max time
+        const timeline = data.timeline;
+        state.playback.totalDuration = timeline.length > 0 ? timeline[timeline.length - 1].end : 0;
+
+        renderGanttStatic(timeline);
+        renderMetrics(data);
+        updateUIForTime(0);
+    }
+
+    // --- Visualizer: Gantt & Playback ---
+    function renderGanttStatic(timeline) {
+        const SCALE = 40; // px per ms
+        const HEIGHT = 60;
+        const totalWidth = state.playback.totalDuration * SCALE + 50; // Buffer
+
+        dom.ganttSvg.innerHTML = ''; // Clear
+        dom.ganttSvg.setAttribute('width', totalWidth);
+        
+        // Draw Grid and Blocks
+        timeline.forEach(block => {
+            const width = (block.end - block.start) * SCALE;
+            const x = block.start * SCALE;
+            
+            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', 20);
+            rect.setAttribute('width', width);
+            rect.setAttribute('height', HEIGHT);
+            rect.setAttribute('rx', 4);
+            rect.classList.add('process-rect');
+            
+            // Color logic
+            if (block.pid === 'idle') {
+                rect.setAttribute('fill', '#e2e8f0');
+                rect.setAttribute('stroke-dasharray', '4');
+            } else if (block.pid === 'context_switch') {
+                rect.setAttribute('fill', '#94a3b8');
+                rect.classList.add('idle-rect');
+            } else {
+                // Find process index for color
+                const idx = state.processes.findIndex(p => p.pid === block.pid);
+                const color = COLORS[idx % COLORS.length] || '#ccc';
+                rect.setAttribute('fill', color);
+            }
+
+            // Events for Tooltip
+            rect.addEventListener('mouseenter', (e) => showTooltip(e, block));
+            rect.addEventListener('mouseleave', hideTooltip);
+
+            // Label
+            if (width > 20 && block.pid !== 'idle' && block.pid !== 'context_switch') {
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute('x', x + width/2);
+                text.setAttribute('y', 20 + HEIGHT/2 + 5);
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('fill', 'white');
+                text.setAttribute('font-size', '12px');
+                text.setAttribute('font-weight', 'bold');
+                text.setAttribute('pointer-events', 'none');
+                text.textContent = block.pid;
+                g.appendChild(text);
+            }
+
+            g.appendChild(rect);
+            dom.ganttSvg.appendChild(g);
+        });
+
+        // Time Axis Labels
+        for (let i = 0; i <= state.playback.totalDuration; i++) {
+            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            text.setAttribute('x', i * SCALE);
+            text.setAttribute('y', 110);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', '10px');
+            text.setAttribute('fill', '#64748b');
+            text.textContent = i;
+            dom.ganttSvg.appendChild(text);
+        }
+    }
+
+    // --- Animation Loop ---
+    function togglePlay() {
+        if(!state.simulation) return;
+        state.playback.isPlaying = !state.playback.isPlaying;
+        dom.btnPlay.textContent = state.playback.isPlaying ? '⏸' : '▶';
+        
+        if (state.playback.isPlaying) {
+            state.playback.lastFrameTime = performance.now();
+            requestAnimationFrame(animate);
+        }
+    }
+
+    function animate(timestamp) {
+        if (!state.playback.isPlaying) return;
+
+        const delta = (timestamp - state.playback.lastFrameTime) / 1000; // sec
+        state.playback.lastFrameTime = timestamp;
+
+        // Advance time
+        state.playback.currentTime += delta * state.playback.speed;
+        
+        if (state.playback.currentTime >= state.playback.totalDuration) {
+            state.playback.currentTime = state.playback.totalDuration;
+            togglePlay(); // Stop at end
+        }
+
+        updateUIForTime(state.playback.currentTime);
+        requestAnimationFrame(animate);
+    }
+
+    function step(dir) {
+        if(!state.simulation) return;
+        state.playback.isPlaying = false;
+        dom.btnPlay.textContent = '▶';
+        
+        let newTime = Math.round(state.playback.currentTime) + dir;
+        if (newTime < 0) newTime = 0;
+        if (newTime > state.playback.totalDuration) newTime = state.playback.totalDuration;
+        
+        state.playback.currentTime = newTime;
+        updateUIForTime(newTime);
+    }
+
+    function updateUIForTime(time) {
+        const SCALE = 40;
+        // Move Cursor
+        dom.timeCursor.style.transform = `translateX(${time * SCALE}px)`;
+        dom.currentTimeLabel.textContent = time.toFixed(1);
+        
+        // Scroll if cursor goes out of view
+        const cursorX = time * SCALE;
+        const wrapperWidth = dom.ganttWrapper.clientWidth;
+        if (cursorX > dom.ganttWrapper.scrollLeft + wrapperWidth - 50) {
+            dom.ganttWrapper.scrollLeft = cursorX - 50;
+        }
+
+        // Update Decision Log
+        updateDecisionLog(time);
+    }
+
+    function updateDecisionLog(time) {
+        if (!state.simulation || !state.simulation.decisions) return;
+        
+        const floorTime = Math.floor(time);
+        // Find decision at or immediately preceding current time
+        const decision = state.simulation.decisions.find(d => d.time === floorTime) 
+                      || state.simulation.decisions.filter(d => d.time < time).pop();
+
+        if (decision) {
+            dom.decisionLog.innerHTML = '';
+            const entry = document.createElement('div');
+            entry.className = 'decision-entry active';
+            
+            let candidatesHTML = '';
+            if(decision.candidates && decision.candidates.length) {
+                candidatesHTML = decision.candidates.map(c => 
+                    `<span class="badge" style="background:#e2e8f0; color:#333; padding:2px 4px; border-radius:3px; margin-right:4px;">${c.pid}(Bur:${c.burst})</span>`
+                ).join('');
+            } else {
+                candidatesHTML = 'None';
+            }
+
+            entry.innerHTML = `
+                <div class="decision-time">Time: ${decision.time}</div>
+                <div class="decision-reason">Chosen: <strong>${decision.chosenPid}</strong></div>
+                <div class="decision-reason">Reason: ${decision.reason}</div>
+                <div class="decision-candidates">Candidates: ${candidatesHTML}</div>
+            `;
+            dom.decisionLog.appendChild(entry);
+        }
+    }
+
+    // --- Metrics & Helpers ---
+    function renderMetrics(data) {
+        dom.metricsBody.innerHTML = '';
+        const m = data.per_process_metrics;
+        for (const [pid, val] of Object.entries(m)) {
+            const row = `<tr>
+                <td>${pid}</td>
+                <td>${val.waiting}</td>
+                <td>${val.turnaround}</td>
+                <td>${val.completion}</td>
+            </tr>`;
+            dom.metricsBody.innerHTML += row;
+        }
+        
+        dom.avgWait.textContent = data.summary.avg_waiting;
+        dom.avgTurn.textContent = data.summary.avg_turnaround;
+        dom.cpuUtil.textContent = data.summary.cpu_util + '%';
+    }
+
+    function showTooltip(e, block) {
+        dom.tooltip.innerHTML = `
+            <strong>${block.pid}</strong><br>
+            Start: ${block.start}<br>
+            End: ${block.end}<br>
+            Dur: ${block.end - block.start}
+        `;
+        dom.tooltip.style.left = e.pageX + 10 + 'px';
+        dom.tooltip.style.top = e.pageY + 10 + 'px';
+        dom.tooltip.classList.remove('hidden');
+    }
+
+    function hideTooltip() {
+        dom.tooltip.classList.add('hidden');
+    }
+
+    function handleKeyboard(e) {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+        if (e.code === 'ArrowRight') step(1);
+        if (e.code === 'ArrowLeft') step(-1);
+    }
+
+    function resetSimulation() {
+        state.playback.isPlaying = false;
+        state.playback.currentTime = 0;
+        dom.ganttSvg.innerHTML = '';
+        dom.decisionLog.innerHTML = '<div class="empty-state">Run simulation to see decisions.</div>';
+        dom.metricsBody.innerHTML = '';
+        dom.avgWait.textContent = '-';
+        dom.avgTurn.textContent = '-';
+        dom.cpuUtil.textContent = '-';
+        state.simulation = null;
+    }
+
+    // --- Import / Export ---
+    function exportData() {
+        const data = {
+            processes: state.processes,
+            config: state.config,
+            simulation: state.simulation
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cpu_sim_scenario.json';
+        a.click();
+    }
+
+    function importData(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+                if(data.processes) state.processes = data.processes;
+                if(data.config) state.config = data.config;
+                
+                // Update UI
+                renderProcessList();
+                dom.algoSelect.value = state.config.algorithm;
+                dom.quantumInput.value = state.config.quantum;
+                dom.csInput.value = state.config.contextSwitch;
+                toggleQuantumInput();
+                
+                if(data.simulation) {
+                    state.simulation = data.simulation;
+                    setupVisualizer(data.simulation);
+                }
+            } catch(err) {
+                alert("Invalid JSON file");
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    // Start
     init();
 
-  })();
-}
+})();

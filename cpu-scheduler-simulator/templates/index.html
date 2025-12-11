@@ -1,123 +1,156 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Intelligent CPU Scheduler</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1.2">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent CPU Scheduler Simulator</title>
+    
+    <!-- Link to the CSS Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="page" role="main">
-    <header class="header">
-      <h1>Intelligent CPU Scheduler</h1>
-      <p class="sub">Animated Gantt • Popup lift animation • export PNG / JSON • responsive & centered</p>
-    </header>
-
-    <main class="main">
-      <aside class="sidebar" aria-label="Controls">
-        <div class="panel">
-          <label for="mode" class="label">Algorithm</label>
-          <select id="mode" aria-label="Choose algorithm">
-            <option value="ADAPTIVE">ADAPTIVE</option>
-            <option value="FCFS">FCFS</option>
-            <option value="SRTF">SRTF</option>
-            <option value="RR">RR</option>
-          </select>
-
-          <label for="goal" class="label">Goal</label>
-          <select id="goal">
-            <option value="">(none)</option>
-            <option value="minWaiting">Minimize waiting</option>
-            <option value="fairness">Fairness</option>
-            <option value="lowContext">Reduce context switches</option>
-          </select>
-
-          <label class="checkbox"><input id="predict" type="checkbox" checked /> Enable prediction</label>
-
-          <div class="recommend" id="recommendBox">
-            <div><strong>Recommendation:</strong> <span id="recAlgo">—</span></div>
-            <div class="muted" id="recReason">—</div>
-            <div class="small">Suggested RR quantum: <b id="recQuantum">-</b></div>
-          </div>
-
-          <div style="margin-top:12px">
-            <table class="json-table" aria-label="Process table">
-              <thead><tr><th>PID</th><th>Arrival</th><th>Burst</th></tr></thead>
-              <tbody id="jsonTableBody"><tr><td colspan="3" class="muted center small">No data</td></tr></tbody>
-            </table>
-          </div>
-
-          <div class="small muted" style="margin-top:8px">
-            Tip: choose <strong>RR</strong> for fairness/time-sharing, <strong>SRTF</strong> to reduce average waiting for short jobs.
-          </div>
-        </div>
-      </aside>
-
-      <section class="content" aria-label="Main content">
-        <div class="card">
-          <div class="card-header">
-            <h2>Gantt & Timeline</h2>
-            <div class="muted" id="tickLabel">Tick: 0 / 0</div>
-          </div>
-
-          <div id="ganttWrap" class="gantt-wrap" role="region" aria-label="Gantt chart area">
-            <div class="gantt-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-              <button id="playBtn" class="btn primary">Play ▶</button>
-              <button id="pauseBtn" class="btn" disabled>Pause ❚❚</button>
-              <button id="stepBack" class="btn">Step -</button>
-              <button id="stepForward" class="btn">Step +</button>
-              <button id="resetBtn" class="btn">Reset</button>
-
-              <label style="margin-left:8px">Speed:
-                <select id="speedSel"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
-              </label>
-
-              <button id="exportPNG" class="btn" title="Download PNG">Export PNG</button>
-              <button id="downloadJSON" class="btn" title="Download schedule JSON">Download JSON</button>
-
-              <!-- moved here per your request -->
-              <button id="loadSimple" class="btn">Load Simple</button>
-              <button id="addRandom" class="btn">Add Random</button>
+    <div class="app-container">
+        
+        <!-- HEADER -->
+        <header>
+            <div class="header-content">
+                <h1>CPU Scheduler <span class="badge">Sim</span></h1>
+                <div class="header-controls">
+                    <button id="theme-toggle" aria-label="Toggle High Contrast Mode">High Contrast</button>
+                    <button id="btn-export" class="btn btn-outline">Export JSON</button>
+                    <label for="file-import" class="btn btn-outline">Import JSON</label>
+                    <input type="file" id="file-import" accept=".json" style="display:none">
+                </div>
             </div>
+        </header>
 
-            <canvas id="gantt" height="220" aria-hidden="false"></canvas>
+        <!-- MAIN GRID -->
+        <main>
+            
+            <!-- LEFT PANEL: CONFIGURATION -->
+            <section class="panel control-panel">
+                <h2>Configuration</h2>
+                
+                <form id="config-form" onsubmit="return false;">
+                    <div class="form-group">
+                        <label for="algo-select">Algorithm</label>
+                        <select id="algo-select" class="form-control">
+                            <option value="FCFS">First Come First Serve (FCFS)</option>
+                            <option value="SJF">Shortest Job First (Non-Preemptive)</option>
+                            <option value="PRIORITY">Priority (Non-Preemptive)</option>
+                            <option value="RR">Round Robin</option>
+                        </select>
+                    </div>
 
-            <div id="processPopup" class="process-popup" aria-hidden="true">
-              <div class="popup-inner">
-                <div class="popup-title" id="popupPid">P1</div>
-                <div class="popup-meta" id="popupMeta">Burst: 5 • Start: 0</div>
-              </div>
-            </div>
-          </div>
+                    <div class="form-row">
+                        <div class="form-group" id="group-quantum" style="display:none;">
+                            <label for="quantum">Quantum (ms)</label>
+                            <input type="number" id="quantum" class="form-control" value="2" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="context-switch">Context Switch (ms)</label>
+                            <input type="number" id="context-switch" class="form-control" value="0" min="0">
+                        </div>
+                    </div>
 
-          <div class="grid-2">
-            <div class="card-section">
-              <h3>Summary</h3>
-              <div id="summaryBox">No data</div>
-            </div>
+                    <div class="processes-header">
+                        <h3>Processes</h3>
+                        <button id="btn-add-process" class="btn btn-sm btn-primary" aria-label="Add Process">+</button>
+                    </div>
 
-            <div class="card-section">
-              <h3>Processes</h3>
-              <table class="proc-table">
-                <thead><tr><th>PID</th><th>Arr</th><th>Burst</th><th></th></tr></thead>
-                <tbody id="procTbody"></tbody>
-              </table>
-            </div>
-          </div>
+                    <div id="process-list" class="process-list custom-scrollbar">
+                        <!-- Dynamic Process Items will appear here -->
+                    </div>
+                </form>
 
-          <div class="card-footer">
-            <div class="add-form">
-              <label>Arrival<input id="inArrival" type="number" min="0" value="0" /></label>
-              <label>Burst<input id="inBurst" type="number" min="1" value="1" /></label>
-              <button id="addProc" class="btn primary">Add</button>
-              <button id="addSample" class="btn">Add Sample</button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
+                <div class="action-buttons">
+                    <button id="btn-run" class="btn btn-primary btn-block">Simulate</button>
+                    <button id="btn-reset" class="btn btn-danger btn-block">Reset</button>
+                </div>
+            </section>
 
-  <script src="/static/js/app.js?v=1.2"></script>
+            <!-- RIGHT PANEL: VISUALIZATION -->
+            <section class="panel viz-panel">
+                
+                <!-- GANTT PLAYER -->
+                <div class="viz-card">
+                    <div class="viz-header">
+                        <h3>Gantt Timeline</h3>
+                        <div class="playback-controls">
+                            <button id="btn-step-back" aria-label="Step Back">⏮</button>
+                            <button id="btn-play-pause" aria-label="Play/Pause">▶</button>
+                            <button id="btn-step-fwd" aria-label="Step Forward">⏭</button>
+                            <div class="speed-control">
+                                <span>Speed:</span>
+                                <input type="range" id="speed-slider" min="1" max="4" step="1" value="3">
+                                <span id="speed-label">1x</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="gantt-wrapper" class="gantt-wrapper custom-scrollbar">
+                        <svg id="gantt-svg" width="100%" height="120"></svg>
+                        <div id="time-cursor"></div>
+                    </div>
+                    <div class="time-display">Current Time: <span id="current-time">0</span></div>
+                </div>
+
+                <!-- BOTTOM GRID: DECISIONS & METRICS -->
+                <div class="bottom-grid">
+                    
+                    <!-- DECISION LOG -->
+                    <div class="viz-card decision-card">
+                        <div class="viz-header">
+                            <h3>Decision Log</h3>
+                        </div>
+                        <div id="decision-log" class="decision-content custom-scrollbar">
+                            <div class="empty-state">Run simulation to see decisions.</div>
+                        </div>
+                    </div>
+
+                    <!-- METRICS -->
+                    <div class="viz-card metrics-card">
+                        <h3>Metrics Summary</h3>
+                        <div id="metrics-content">
+                            <table class="metrics-table">
+                                <thead>
+                                    <tr>
+                                        <th>PID</th>
+                                        <th>Wait</th>
+                                        <th>Turnaround</th>
+                                        <th>Completion</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="metrics-body">
+                                    <!-- Dynamic Rows -->
+                                </tbody>
+                            </table>
+                            <div class="summary-stats">
+                                <div class="stat-box">
+                                    <span class="stat-label">Avg Wait</span>
+                                    <span class="stat-val" id="avg-wait">-</span>
+                                </div>
+                                <div class="stat-box">
+                                    <span class="stat-label">Avg Turn</span>
+                                    <span class="stat-val" id="avg-turn">-</span>
+                                </div>
+                                <div class="stat-box">
+                                    <span class="stat-label">Util %</span>
+                                    <span class="stat-val" id="cpu-util">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Tooltip Element -->
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Link to the JavaScript Logic -->
+    <script src="app.js"></script>
 </body>
 </html>
